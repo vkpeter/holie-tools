@@ -1,6 +1,7 @@
 {
   "name": "@holie/ai-keten",
   "version": "0.1.0",
+  "license": "MIT",
   "exports": "./mod.ts",
   "publish": {
     "include": [
