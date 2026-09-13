@@ -365,21 +365,32 @@ export async function bouwMcpBundel(
       name: "lovable-mcp-resolve-vite-aliases",
       // deno-lint-ignore no-explicit-any
       setup(b: any) {
-        b.onResolve({ filter: /.*/ }, (args: any) => {
-          if (args.pluginData?.viteAliasResolved) return null;
-          if (
-            args.path === "@lovable.dev/mcp-js" ||
-            args.path.startsWith("@lovable.dev/mcp-js/")
-          ) return null;
-          const vervangen = pasAliasToe(args.path, aliases);
-          if (vervangen === undefined) return null;
-          return b.resolve(vervangen, {
-            kind: args.kind,
-            importer: args.importer,
-            resolveDir: args.resolveDir,
-            pluginData: { viteAliasResolved: true },
-          });
-        });
+        b.onResolve(
+          { filter: /.*/ },
+          (
+            args: {
+              path: string;
+              importer: string;
+              kind: string;
+              resolveDir: string;
+              pluginData?: { viteAliasResolved?: boolean };
+            },
+          ) => {
+            if (args.pluginData?.viteAliasResolved) return null;
+            if (
+              args.path === "@lovable.dev/mcp-js" ||
+              args.path.startsWith("@lovable.dev/mcp-js/")
+            ) return null;
+            const vervangen = pasAliasToe(args.path, aliases);
+            if (vervangen === undefined) return null;
+            return b.resolve(vervangen, {
+              kind: args.kind,
+              importer: args.importer,
+              resolveDir: args.resolveDir,
+              pluginData: { viteAliasResolved: true },
+            });
+          },
+        );
       },
     }, {
       name: "lovable-mcp-externalize-bare-as-npm",
