@@ -103,8 +103,9 @@ stil een stub, en zonder banner veroudert de bundel ongemerkt.
 
 ```js
 // scripts/bundle-mcp.mjs
+import { fileURLToPath } from "node:url";
 import { bouwMcpBundel, controleerMcpBundel } from "@holie/tools/mcp-bundel";
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv.includes("--check")) {
   const { inOrde, fouten } = await controleerMcpBundel(root);
   for (const f of fouten) console.error(`- ${f}`);

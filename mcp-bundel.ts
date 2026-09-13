@@ -21,8 +21,9 @@
  *
  * ```js
  * // scripts/bundle-mcp.mjs
+ * import { fileURLToPath } from "node:url";
  * import { bouwMcpBundel, controleerMcpBundel } from "@holie/tools/mcp-bundel";
- * const root = new URL("..", import.meta.url).pathname;
+ * const root = fileURLToPath(new URL("..", import.meta.url));
  * if (process.argv.includes("--check")) {
  *   const { inOrde, fouten } = await controleerMcpBundel(root);
  *   for (const f of fouten) console.error(`- ${f}`);
@@ -231,6 +232,74 @@ function vindSdkEnEsbuild(root: string): { sdk: string; esbuild: string } {
   return { sdk, esbuild };
 }
 
+/** Een Vite-alias zoals `config.resolve.alias` hem na normalisatie geeft. */
+export interface ViteAlias {
+  find: string | RegExp;
+  replacement: string;
+}
+
+/**
+ * Exact de aliaslogica van de Lovable-plugin (`applyViteAliases`): een RegExp vervangt,
+ * een string matcht het hele pad of `find + "/"`. Geeft `undefined` zonder treffer.
+ */
+export function pasAliasToe(
+  pad: string,
+  aliases: readonly ViteAlias[],
+): string | undefined {
+  for (const { find, replacement } of aliases) {
+    if (find instanceof RegExp) {
+      if (find.test(pad)) return pad.replace(find, replacement);
+    } else if (pad === find || pad.startsWith(find + "/")) {
+      return replacement + pad.slice(find.length);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Aliassen uit `compilerOptions.paths` van tsconfig.json (`"@/*": ["./src/*"]` wordt
+ * `@` naar `<root>/src`). Voor de CLI en de pre-commit-hook, die de Vite-config niet
+ * kennen; in Vite zelf komen de aliassen uit `config.resolve.alias`, net als bij de
+ * plugin. Zonder dit werd `@/lib/x` een `npm:@/lib/x`-import (Billara, 13 sep 2026).
+ */
+export function aliasesUitTsconfig(root: string): ViteAlias[] {
+  let tekst: string;
+  try {
+    tekst = readFileSync(join(root, "tsconfig.json"), "utf8");
+  } catch {
+    return [];
+  }
+  // deno-lint-ignore no-explicit-any
+  let cfg: any;
+  try {
+    cfg = JSON.parse(tekst);
+  } catch {
+    try {
+      cfg = JSON.parse(
+        tekst.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+          .replace(/,(\s*[}\]])/g, "$1"),
+      );
+    } catch {
+      return [];
+    }
+  }
+  const opts = cfg?.compilerOptions ?? {};
+  const basis = resolve(root, opts.baseUrl ?? ".");
+  const aliases: ViteAlias[] = [];
+  for (const [patroon, doelen] of Object.entries(opts.paths ?? {})) {
+    const doel = Array.isArray(doelen) ? doelen[0] : undefined;
+    if (
+      typeof doel !== "string" || !patroon.endsWith("/*") ||
+      !doel.endsWith("/*")
+    ) continue;
+    aliases.push({
+      find: patroon.slice(0, -2),
+      replacement: resolve(basis, doel.slice(0, -2)),
+    });
+  }
+  return aliases;
+}
+
 export interface BouwResultaat {
   pad: string;
   inhoud: string;
@@ -244,9 +313,10 @@ export interface BouwResultaat {
  */
 export async function bouwMcpBundel(
   projectRoot: string,
-  opties: { schrijf?: boolean } = {},
+  opties: { schrijf?: boolean; aliases?: ViteAlias[] } = {},
 ): Promise<BouwResultaat> {
   const root = resolve(projectRoot);
+  const aliases = opties.aliases ?? aliasesUitTsconfig(root);
   const { sdk, esbuild } = vindSdkEnEsbuild(root);
   // require, geen import(): esbuild is CommonJS, en Deno laadt dat niet via import().
   const { build } = createRequire(join(root, "package.json"))(esbuild);
@@ -291,6 +361,27 @@ export async function bouwMcpBundel(
     logLevel: "silent",
     define,
     plugins: [{
+      // Zelfde volgorde als de plugin: eerst Vite-aliassen, dan bare imports extern.
+      name: "lovable-mcp-resolve-vite-aliases",
+      // deno-lint-ignore no-explicit-any
+      setup(b: any) {
+        b.onResolve({ filter: /.*/ }, (args: any) => {
+          if (args.pluginData?.viteAliasResolved) return null;
+          if (
+            args.path === "@lovable.dev/mcp-js" ||
+            args.path.startsWith("@lovable.dev/mcp-js/")
+          ) return null;
+          const vervangen = pasAliasToe(args.path, aliases);
+          if (vervangen === undefined) return null;
+          return b.resolve(vervangen, {
+            kind: args.kind,
+            importer: args.importer,
+            resolveDir: args.resolveDir,
+            pluginData: { viteAliasResolved: true },
+          });
+        });
+      },
+    }, {
       name: "lovable-mcp-externalize-bare-as-npm",
       // deno-lint-ignore no-explicit-any
       setup(b: any) {
@@ -380,12 +471,16 @@ export async function controleerMcpBundel(
 export function mcpBundelHerstelPlugin(opties: { root: string }): any {
   const root = opties.root;
   let bezig: Promise<void> | null = null;
+  let viteAliases: ViteAlias[] | undefined;
   const herstel = (aanleiding: string): Promise<void> => {
     bezig = (bezig ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
         try {
-          const { gewijzigd } = await bouwMcpBundel(root);
+          const { gewijzigd } = await bouwMcpBundel(
+            root,
+            viteAliases ? { aliases: viteAliases } : {},
+          );
           if (gewijzigd) {
             console.log(`[mcp-bundel] ${BUNDEL_PAD} herbouwd (${aanleiding})`);
           }
@@ -402,7 +497,17 @@ export function mcpBundelHerstelPlugin(opties: { root: string }): any {
   };
   return {
     name: "holie-mcp-bundel-herstel",
-    configResolved: () => herstel("configResolved"),
+    // deno-lint-ignore no-explicit-any
+    configResolved: (config: any) => {
+      const alias = config?.resolve?.alias;
+      if (Array.isArray(alias)) {
+        viteAliases = alias.map(({ find, replacement }: ViteAlias) => ({
+          find,
+          replacement,
+        }));
+      }
+      return herstel("configResolved");
+    },
     buildStart: () => herstel("buildStart"),
     // deno-lint-ignore no-explicit-any
     configureServer(server: any) {

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  aliasesUitTsconfig,
   BANNER,
   controleerInhoud,
   controleerMcpBundel,
@@ -11,6 +12,7 @@ import {
   leesEnv,
   normaliseer,
   npmSpecifier,
+  pasAliasToe,
   toolnamenUitTekst,
   vergelijkBundels,
 } from "./mcp-bundel.ts";
@@ -104,4 +106,23 @@ Deno.test("controleerMcpBundel: repo zonder src/lib/mcp is in orde, ontbrekende 
   const r = await controleerMcpBundel(root);
   assertEquals(r.inOrde, false);
   assertMatch(r.fouten[0], /ontbreekt/);
+});
+
+Deno.test("Vite-aliassen: zelfde logica als de plugin, standaard uit tsconfig-paths", () => {
+  const root = mkdtempSync(join(tmpdir(), "mcp-bundel-"));
+  writeFileSync(
+    join(root, "tsconfig.json"),
+    `{\n  // commentaar\n  "compilerOptions": { "paths": { "@/*": ["./src/*"] } },\n}\n`,
+  );
+  const aliases = aliasesUitTsconfig(root);
+  assertEquals(aliases, [{ find: "@", replacement: join(root, "src") }]);
+  assertEquals(
+    pasAliasToe("@/lib/billing/md5", aliases),
+    join(root, "src") + "/lib/billing/md5",
+  );
+  assertEquals(pasAliasToe("@tanstack/react-query", aliases), undefined);
+  assertEquals(
+    pasAliasToe("abc/x", [{ find: /^abc/, replacement: "/r" }]),
+    "/r/x",
+  );
 });
