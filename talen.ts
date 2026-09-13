@@ -64,10 +64,10 @@ export function normaliseerInstelling(
   const lijst = (v: unknown, anders: string[]) =>
     Array.isArray(v) ? uniek(v.filter((c): c is string => typeof c === "string" && gekend.includes(c))) : anders;
 
-  const bron = typeof o.bron === "string" && gekend.includes(o.bron) ? o.bron : standaard.bron;
-  const beschikbaar = uniek([bron, ...lijst(o.beschikbaar, standaard.beschikbaar)]);
-  const actief = uniek([bron, ...lijst(o.actief, standaard.actief).filter((c) => beschikbaar.includes(c))]);
-  const terugval = typeof o.terugval === "string" && actief.includes(o.terugval) ? o.terugval : bron;
+  const bron = typeof o["bron"] === "string" && gekend.includes(o["bron"]) ? o["bron"] : standaard.bron;
+  const beschikbaar = uniek([bron, ...lijst(o["beschikbaar"], standaard.beschikbaar)]);
+  const actief = uniek([bron, ...lijst(o["actief"], standaard.actief).filter((c) => beschikbaar.includes(c))]);
+  const terugval = typeof o["terugval"] === "string" && actief.includes(o["terugval"]) ? o["terugval"] : bron;
 
   return { beschikbaar, actief, bron, terugval };
 }

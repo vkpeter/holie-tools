@@ -4,12 +4,14 @@
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
-    "./talen": "./talen.ts"
+    "./talen": "./talen.ts",
+    "./mcp-bundel": "./mcp-bundel.ts"
   },
   "publish": {
     "include": [
       "ai.ts",
       "talen.ts",
+      "mcp-bundel.ts",
       "README.md",
       "LICENSE"
     ]
