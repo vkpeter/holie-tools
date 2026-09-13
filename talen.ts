@@ -78,14 +78,19 @@ export const TAALCATALOGUS: readonly TaalInfo[] = [
   },
 ];
 
-export interface TaalInstelling {
-  beschikbaar: string[];
-  actief: string[];
-  bron: string;
-  terugval: string;
+/**
+ * Taalinstelling van een site. De generiek is optioneel: een project met een letterlijke
+ * union (bv. `type Lang = "nl" | "en"`) schrijft `TaalInstelling<Lang>` en hoeft niet
+ * te casten. Zonder generiek blijft alles `string`.
+ */
+export interface TaalInstelling<T extends string = string> {
+  beschikbaar: T[];
+  actief: T[];
+  bron: T;
+  terugval: T;
 }
 
-const uniek = (codes: string[]) => [...new Set(codes)];
+const uniek = <T>(codes: T[]): T[] => [...new Set(codes)];
 
 /**
  * Maakt van een opgeslagen waarde (JSON-tekst of object) een geldige instelling.
@@ -93,11 +98,11 @@ const uniek = (codes: string[]) => [...new Set(codes)];
  * deelverzameling van `beschikbaar`, en `terugval` is altijd actief. Kapotte of lege
  * invoer geeft de standaard terug: een tikfout in de admin mag de site niet leegmaken.
  */
-export function normaliseerInstelling(
+export function normaliseerInstelling<T extends string = string>(
   ruw: unknown,
-  standaard: TaalInstelling,
-  gekend: readonly string[] = TAALCATALOGUS.map((t) => t.code),
-): TaalInstelling {
+  standaard: TaalInstelling<T>,
+  gekend: readonly T[] = TAALCATALOGUS.map((t) => t.code) as unknown as T[],
+): TaalInstelling<T> {
   let obj: unknown = ruw;
   if (typeof ruw === "string") {
     try {
@@ -109,18 +114,12 @@ export function normaliseerInstelling(
   if (!obj || typeof obj !== "object") return standaard;
   const o = obj as Record<string, unknown>;
 
-  const lijst = (v: unknown, anders: string[]) =>
-    Array.isArray(v)
-      ? uniek(
-        v.filter((c): c is string =>
-          typeof c === "string" && gekend.includes(c)
-        ),
-      )
-      : anders;
+  const isGekend = (c: unknown): c is T =>
+    typeof c === "string" && (gekend as readonly string[]).includes(c);
+  const lijst = (v: unknown, anders: T[]): T[] =>
+    Array.isArray(v) ? uniek(v.filter(isGekend)) : anders;
 
-  const bron = typeof o["bron"] === "string" && gekend.includes(o["bron"])
-    ? o["bron"]
-    : standaard.bron;
+  const bron: T = isGekend(o["bron"]) ? o["bron"] : standaard.bron;
   const beschikbaar = uniek([
     bron,
     ...lijst(o["beschikbaar"], standaard.beschikbaar),
@@ -131,33 +130,33 @@ export function normaliseerInstelling(
       beschikbaar.includes(c)
     ),
   ]);
-  const terugval =
-    typeof o["terugval"] === "string" && actief.includes(o["terugval"])
-      ? o["terugval"]
-      : bron;
+  const terugval: T = isGekend(o["terugval"]) && actief.includes(o["terugval"])
+    ? o["terugval"]
+    : bron;
 
   return { beschikbaar, actief, bron, terugval };
 }
 
-export const isActief = (
-  inst: TaalInstelling,
+export const isActief = <T extends string>(
+  inst: TaalInstelling<T>,
   code: string | null | undefined,
-): boolean => !!code && inst.actief.includes(code);
+): code is T => !!code && (inst.actief as readonly string[]).includes(code);
 
-export const isBeschikbaar = (
-  inst: TaalInstelling,
+export const isBeschikbaar = <T extends string>(
+  inst: TaalInstelling<T>,
   code: string | null | undefined,
-): boolean => !!code && inst.beschikbaar.includes(code);
+): code is T =>
+  !!code && (inst.beschikbaar as readonly string[]).includes(code);
 
 /**
  * Talen waarnaar vertaald mag worden: actief, zonder de bron. Met `gevraagd` blijft
  * enkel de doorsnede over, zodat een oude aanroeper die "alle talen" vraagt geen
  * uitgeschakelde taal meer aanmaakt.
  */
-export function doelTalen(
-  inst: TaalInstelling,
+export function doelTalen<T extends string>(
+  inst: TaalInstelling<T>,
   gevraagd?: readonly string[] | null,
-): string[] {
+): T[] {
   const doel = inst.actief.filter((c) => c !== inst.bron);
   return gevraagd && gevraagd.length
     ? doel.filter((c) => gevraagd.includes(c))
@@ -165,8 +164,10 @@ export function doelTalen(
 }
 
 /** De taal zelf als ze actief is, anders de terugvaltaal. */
-export const vervangTaal = (inst: TaalInstelling, code: string): string =>
-  isActief(inst, code) ? code : inst.terugval;
+export const vervangTaal = <T extends string>(
+  inst: TaalInstelling<T>,
+  code: string,
+): T => isActief(inst, code) ? code : inst.terugval;
 
 export const taalInfo = (code: string): TaalInfo | undefined =>
   TAALCATALOGUS.find((t) => t.code === code);

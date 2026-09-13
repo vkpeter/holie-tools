@@ -3,7 +3,9 @@ import {
   AiOnbeschikbaar,
   type AiPoging,
   AiQuotumFout,
+  bouwDeepseekBody,
   callAi,
+  foutTekst,
   heeftBeeldInSysteem,
 } from "./ai.ts";
 
@@ -257,6 +259,141 @@ Deno.test("noemt de sleutels en de laatste fout als alles faalt", async () => {
       AiOnbeschikbaar,
       "No AI provider available (sleutels: lovable+deepseek; laatste fout: deepseek gaf 401)",
     );
+  } finally {
+    f.herstel();
+  }
+});
+
+// ---- 0.2.0 ----
+
+Deno.test("stuurt max_tokens en temperature enkel mee als ze opgegeven zijn", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await callAi(vraag, { label: "t", sleutels });
+    assertEquals("max_tokens" in f.aanroepen[0].body, false);
+    assertEquals("temperature" in f.aanroepen[0].body, false);
+    await callAi(vraag, {
+      label: "t",
+      sleutels,
+      maxTokens: 50,
+      temperature: 0,
+    });
+    assertEquals(f.aanroepen[1].body.max_tokens, 50);
+    assertEquals(f.aanroepen[1].body.temperature, 0);
+  } finally {
+    f.herstel();
+  }
+  const ds = bouwDeepseekBody({ model: "m", messages: [] });
+  assertEquals("max_tokens" in ds, false);
+  assertEquals(ds.thinking, { type: "disabled" });
+});
+
+Deno.test("stuurt response_format mee", async () => {
+  const f = metAntwoorden({ content: "{}" });
+  try {
+    await callAi(vraag, {
+      label: "t",
+      sleutels,
+      responseFormat: { type: "json_object" },
+    });
+    assertEquals(f.aanroepen[0].body.response_format, { type: "json_object" });
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("herkanst bij een netwerkfout binnen dezelfde provider", async () => {
+  const origineel = globalThis.fetch;
+  const urls: string[] = [];
+  let n = 0;
+  globalThis.fetch = ((url: string) => {
+    urls.push(url);
+    if (n++ === 0) return Promise.reject(new TypeError("connection reset"));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        }),
+      ),
+    );
+  }) as typeof fetch;
+  try {
+    const r = await callAi(vraag, { label: "t", sleutels, pogingen: 2 });
+    assertEquals(r.provider, "lovable");
+    assertEquals(urls.length, 2);
+    assertEquals(urls[0], urls[1]);
+  } finally {
+    globalThis.fetch = origineel;
+  }
+});
+
+Deno.test("geeft de lengte van de inhoud mee aan bijSucces", async () => {
+  const f = metAntwoorden({ content: "hallo" });
+  const gezien: AiPoging[] = [];
+  try {
+    await callAi(vraag, {
+      label: "t",
+      sleutels,
+      bijSucces: (p) => {
+        gezien.push(p);
+      },
+    });
+    assertEquals(gezien[0].lengte, 5);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("herkanst een afgekeurd antwoord bij dezelfde provider als dat gevraagd wordt", async () => {
+  const f = metAntwoorden({ content: "Sorry" }, { content: "goed" });
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels,
+      pogingen: 2,
+      aanvaard: (c) => c !== "Sorry",
+      herkansBijAfkeuring: true,
+    });
+    assertEquals(r.content, "goed");
+    assertEquals(r.provider, "lovable");
+    assertEquals(f.aanroepen.length, 2);
+    assert(f.aanroepen.every((a) => a.url.includes("lovable")));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("foutTekst: Error, PostgREST-fout, onbekend object, primitief", () => {
+  assertEquals(foutTekst(new Error("stuk")), "stuk");
+  assertEquals(
+    foutTekst({
+      message: "duplicate key",
+      code: "23505",
+      details: "Key (id)=(1) already exists.",
+      hint: "",
+    }),
+    "duplicate key | 23505 | Key (id)=(1) already exists.",
+  );
+  // De inhoud van een onbekend object hoort niet in een log.
+  assertEquals(
+    foutTekst({ email: "iemand@voorbeeld.test" }),
+    "onbekende fout (Object)",
+  );
+  assertEquals(foutTekst("tekst"), "tekst");
+  assertEquals(foutTekst(null), "null");
+});
+
+Deno.test("een hook die een niet-Error gooit, breekt niets", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels,
+      bijSucces: () => {
+        throw { message: "insert mislukt", code: "42501" };
+      },
+    });
+    assertEquals(r.content, "ok");
   } finally {
     f.herstel();
   }

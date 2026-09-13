@@ -78,6 +78,25 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
 
+## Nieuw in 0.2.0 (ai)
+
+- **`maxTokens` en `temperature` gaan enkel mee als je ze opgeeft.** Tot 0.1.1
+  stuurde de keten altijd 1000 en 0,2 mee. Wil je het oude gedrag, geef ze dan
+  expliciet op.
+- **`responseFormat`** gaat mee als `response_format`, bv.
+  `{ type: "json_object" }`.
+- **Herkansing bij een netwerkfout** (DNS, connection reset) binnen `pogingen`,
+  net als bij een 5xx. Een timeout of een extern afbreken krijgt geen
+  herkansing.
+- **`herkansBijAfkeuring`**: een antwoord dat `aanvaard` afkeurt, eerst opnieuw
+  vragen bij dezelfde provider in plaats van meteen door te vallen.
+- **`lengte`** in `AiPoging`: het aantal tekens van de ontvangen inhoud, voor de
+  hooks.
+- **`foutTekst(err)`** is geexporteerd. Het maakt van elke gegooide waarde een
+  leesbare tekst: een PostgREST-fout wordt `message | code | details | hint` in
+  plaats van `[object Object]`. Van een onbekend object komt enkel de soort mee,
+  nooit de inhoud.
+
 ## talen
 
 ```ts
@@ -128,6 +147,53 @@ await bouwMcpBundel(root);
 > die via `references` naar verwijst (`tsconfig.app.json` en dergelijke). Staan
 > je `paths` enkel daar, zet ze dan ook in `tsconfig.json` of geef de aliassen
 > mee via de Vite-config.
+
+**0.2.0:** `TaalInstelling<T extends string = string>` aanvaardt een letterlijke
+union (`TaalInstelling<Lang>`), zodat een project niet hoeft te casten.
+`mcpBundelHerstelPlugin` kreeg `faalHard` (standaard `true`); met `false` logt
+een mislukte herbouw enkel en loopt de Vite-build door.
+
+## telegram
+
+Berichten versturen via de Telegram Bot API en een webhook controleren. Enkel
+`fetch` en Web Crypto, dus het werkt in Supabase edge functions en in een
+Cloudflare Worker.
+
+```ts
+import {
+  controleerWebhookGeheim,
+  escapeHtml,
+  stuurTelegramBericht,
+} from "jsr:@holie/tools/telegram";
+
+// Het project leest zelf zijn token en chat-id; het pakket kent er geen.
+const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+const r = await stuurTelegramBericht(
+  token,
+  chatId,
+  `<b>${escapeHtml(titel)}</b>`,
+);
+if (!r.ok) console.warn("telegram:", r.fout); // zonder token
+
+// In de webhook:
+if (!controleerWebhookGeheim(req, Deno.env.get("TELEGRAM_WEBHOOK_SECRET"))) {
+  return new Response("Unauthorized", { status: 401 });
+}
+```
+
+- `stuurTelegramBericht` gooit nooit, standaard `parse_mode: "HTML"` zonder
+  linkvoorbeeld, knipt boven 4096 tekens op regeleinden, en geeft na een 429 met
+  een korte `retry_after` één herkansing.
+- `stuurNaarChats` stuurt naar meerdere chats en telt de bereikte.
+- `controleerWebhookGeheim` weigert altijd als er geen verwacht geheim is.
+- `leidWebhookGeheimAf(token)` geeft een geheim afgeleid van het token (SHA-256,
+  base64url), gelijk aan wat Eagle-Eye Scissors al gebruikt.
+
+**Privacy en sleutels.** De module leest geen omgevingsvariabelen, bevat geen
+tokens, chat-id's of ontvangers en logt niets. Het token staat in de URL van de
+Bot API, en Deno zet die URL in een fetch-foutmelding: `fout` is daarom altijd
+ontdaan van het token. Wat projectspecifiek is (welke beheerders, welke tabel,
+de logica van een bot) blijft in het project.
 
 ## Ontwikkelen
 

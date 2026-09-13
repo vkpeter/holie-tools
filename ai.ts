@@ -49,6 +49,8 @@ export interface AiPoging {
   status: number;
   finishReason?: string;
   usage?: AiVerbruik;
+  /** Lengte van de ontvangen inhoud in tekens, als er een antwoord was. */
+  lengte?: number;
   /** Omschrijving van wat er misliep; leeg bij succes. */
   fout?: string;
 }
@@ -56,8 +58,15 @@ export interface AiPoging {
 export interface AiOpties {
   /** Naam in de logregels. */
   label: string;
+  /** Enkel meegestuurd als je hem opgeeft; anders kiest de provider. */
   maxTokens?: number;
+  /** Enkel meegestuurd als je hem opgeeft; anders kiest de provider. */
   temperature?: number;
+  /**
+   * Gaat mee als `response_format`, bv. `{ type: "json_object" }` om JSON af te
+   * dwingen. Beide providers zijn OpenAI-compatibel.
+   */
+  responseFormat?: Record<string, unknown>;
   /** Standaard `["lovable", "deepseek"]`. */
   volgorde?: AiProvider[];
   lovableModel?: string;
@@ -67,7 +76,11 @@ export interface AiOpties {
   deepseekDenken?: boolean;
   /** De berichten bevatten een beeld. */
   beeld?: boolean;
-  /** Pogingen per provider, standaard 1. Een herkansing volgt enkel op lege inhoud, 5xx of 429. */
+  /**
+   * Pogingen per provider, standaard 1. Een herkansing volgt op lege inhoud, 5xx, 429
+   * of een netwerkfout (niet op een timeout of een extern afbreken), en met
+   * `herkansBijAfkeuring` ook op een afgekeurd antwoord.
+   */
   pogingen?: number;
   /** Afbreken na zoveel milliseconden per poging. */
   timeoutMs?: number;
@@ -82,8 +95,13 @@ export interface AiOpties {
    * provider; `"throw"` stopt met een `AiQuotumFout`.
    */
   opQuotum?: "doorvallen" | "throw";
-  /** Keurt een antwoord af: dan komt de volgende provider aan de beurt, zonder herhaling. */
+  /**
+   * Keurt een antwoord af: dan komt de volgende provider aan de beurt, zonder herhaling,
+   * tenzij `herkansBijAfkeuring` aan staat.
+   */
   aanvaard?: (content: string, provider: string) => boolean;
+  /** Een afgekeurd antwoord eerst opnieuw vragen bij dezelfde provider (binnen `pogingen`). */
+  herkansBijAfkeuring?: boolean;
   /** Sleutels in plaats van de omgevingsvariabelen `LOVABLE_API_KEY` en `DEEPSEEK_API_KEY`. */
   sleutels?: Partial<Record<AiProvider, string>>;
   /** Na een geslaagde poging, bv. om verbruik weg te schrijven. Een fout hierin wordt genegeerd. */
@@ -133,17 +151,52 @@ export class AiOnbeschikbaar extends Error {
 export function bouwDeepseekBody(opties: {
   model: string;
   messages: unknown[];
-  maxTokens: number;
-  temperature: number;
+  maxTokens?: number;
+  temperature?: number;
   denken?: boolean;
 }): Record<string, unknown> {
   return {
     model: opties.model,
     messages: opties.messages,
-    max_tokens: opties.maxTokens,
-    temperature: opties.temperature,
+    ...limieten(opties.maxTokens, opties.temperature),
     thinking: { type: opties.denken ? "enabled" : "disabled" },
   };
+}
+
+/** `max_tokens` en `temperature`, maar enkel wat de aanroeper echt opgaf. */
+function limieten(
+  maxTokens?: number,
+  temperature?: number,
+): Record<string, number> {
+  const uit: Record<string, number> = {};
+  if (maxTokens !== undefined) uit.max_tokens = maxTokens;
+  if (temperature !== undefined) uit.temperature = temperature;
+  return uit;
+}
+
+/**
+ * Maakt van elke gegooide waarde een leesbare tekst, nooit `[object Object]`.
+ * - Een `Error` geeft zijn `message`.
+ * - Een object met `message`, `code`, `details` of `hint` (zoals een PostgREST-fout
+ *   van supabase-js) geeft die velden, gescheiden door ` | `.
+ * - Een ander object geeft enkel zijn soort, niet zijn inhoud: die kan
+ *   gebruikersgegevens bevatten en hoort niet ongevraagd in een log.
+ */
+export function foutTekst(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name;
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const delen = ["message", "code", "details", "hint"]
+      .map((k) => o[k])
+      .filter((v) =>
+        (typeof v === "string" && v !== "") || typeof v === "number"
+      )
+      .map(String);
+    if (delen.length > 0) return delen.join(" | ");
+    const soort = (o.constructor as { name?: string } | undefined)?.name;
+    return `onbekende fout (${soort || "object"})`;
+  }
+  return String(err);
 }
 
 /** Zit er een beeld in een system- of assistant-bericht? DeepSeek weigert dat met een 400. */
@@ -178,9 +231,7 @@ async function roep(
     await hook(poging);
   } catch (e) {
     console.warn(
-      `[ai:${poging.label}] hook faalde: ${
-        e instanceof Error ? e.message : String(e)
-      }`,
+      `[ai:${poging.label}] hook faalde: ${foutTekst(e)}`,
     );
   }
 }
@@ -214,8 +265,8 @@ export async function callAi(
 ): Promise<AiAntwoord> {
   const {
     label,
-    maxTokens = 1000,
-    temperature = 0.2,
+    maxTokens,
+    temperature,
     volgorde = ["lovable", "deepseek"],
     pogingen = 1,
   } = opties;
@@ -254,7 +305,8 @@ export async function callAi(
         temperature,
         denken: opties.deepseekDenken,
       })
-      : { model, messages, max_tokens: maxTokens, temperature };
+      : { model, messages, ...limieten(maxTokens, temperature) };
+    if (opties.responseFormat) body.response_format = opties.responseFormat;
     if (
       opties.tools &&
       (opties.toolsVoor ?? ["lovable", "deepseek"]).includes(naam)
@@ -310,6 +362,7 @@ export async function callAi(
             status: resp.status,
             finishReason,
             usage,
+            lengte: content.length,
           };
 
           if (Array.isArray(toolCalls) && toolCalls.length > 0) {
@@ -337,7 +390,8 @@ export async function callAi(
             }
             laatsteFout = `${provider}: antwoord afgekeurd`;
             await roep(opties.bijFout, { ...verslag, fout: laatsteFout });
-            break;
+            if (!opties.herkansBijAfkeuring) break;
+            herkansing = true;
           }
 
           laatsteFout =
@@ -351,11 +405,7 @@ export async function callAi(
         const afgebroken = err instanceof DOMException &&
           (err.name === "TimeoutError" || err.name === "AbortError");
         laatsteFout = `${provider}: ${
-          afgebroken
-            ? "afgebroken (timeout of deadline)"
-            : err instanceof Error
-            ? err.message
-            : String(err)
+          afgebroken ? "afgebroken (timeout of deadline)" : foutTekst(err)
         }`;
         laatsteStatus = 0;
         console.warn(`[ai:${label}] ${laatsteFout}`);
@@ -366,6 +416,9 @@ export async function callAi(
           fout: laatsteFout,
         });
         if (opties.signal?.aborted) break;
+        // Een netwerkfout (DNS, connection reset) krijgt dezelfde herkansing als een
+        // 5xx. Een timeout niet: die zou de wachttijd enkel verdubbelen.
+        herkansing = !afgebroken;
       }
 
       if (!herkansing || poging >= pogingen) break;

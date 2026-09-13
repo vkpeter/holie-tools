@@ -477,9 +477,15 @@ export async function controleerMcpBundel(
 /**
  * Vite-plugin die de bundel na de Lovable-plugin herbouwt (configResolved, buildStart
  * en bij wijzigingen in `src/lib/mcp` in dev). Zet hem ná `mcpPlugin()`.
+ *
+ * `faalHard` (standaard `true`): een mislukte herbouw breekt de Vite-build. Met `false`
+ * wordt de fout enkel gelogd en loopt de build door, zoals Billara het in zijn eigen
+ * wrapper deed; de pre-commit-controle (`controleerMcpBundel`) blijft dan de poort.
  */
-// deno-lint-ignore no-explicit-any
-export function mcpBundelHerstelPlugin(opties: { root: string }): any {
+export function mcpBundelHerstelPlugin(
+  opties: { root: string; faalHard?: boolean },
+  // deno-lint-ignore no-explicit-any
+): any {
   const root = opties.root;
   let bezig: Promise<void> | null = null;
   let viteAliases: ViteAlias[] | undefined;
@@ -501,7 +507,7 @@ export function mcpBundelHerstelPlugin(opties: { root: string }): any {
               (err as Error).message
             }`,
           );
-          throw err;
+          if (opties.faalHard !== false) throw err;
         }
       });
     return bezig;

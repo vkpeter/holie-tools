@@ -1,17 +1,19 @@
 {
   "name": "@holie/tools",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
     "./talen": "./talen.ts",
-    "./mcp-bundel": "./mcp-bundel.ts"
+    "./mcp-bundel": "./mcp-bundel.ts",
+    "./telegram": "./telegram.ts"
   },
   "publish": {
     "include": [
       "ai.ts",
       "talen.ts",
       "mcp-bundel.ts",
+      "telegram.ts",
       "README.md",
       "LICENSE"
     ]
