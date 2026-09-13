@@ -15,10 +15,20 @@ Deno.test("kapotte of lege invoer geeft de standaard", () => {
 
 Deno.test("actief blijft binnen beschikbaar, bron altijd erbij, onbekende codes weg", () => {
   const inst = normaliseerInstelling(
-    JSON.stringify({ beschikbaar: ["en", "xx"], actief: ["en", "es"], bron: "nl", terugval: "es" }),
+    JSON.stringify({
+      beschikbaar: ["en", "xx"],
+      actief: ["en", "es"],
+      bron: "nl",
+      terugval: "es",
+    }),
     STANDAARD,
   );
-  assertEquals(inst, { beschikbaar: ["nl", "en"], actief: ["nl", "en"], bron: "nl", terugval: "nl" });
+  assertEquals(inst, {
+    beschikbaar: ["nl", "en"],
+    actief: ["nl", "en"],
+    bron: "nl",
+    terugval: "nl",
+  });
 });
 
 Deno.test("doelTalen laat uitgeschakelde talen weg, ook als ze gevraagd worden", () => {

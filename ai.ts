@@ -153,7 +153,8 @@ export function heeftBeeldInSysteem(messages: unknown[]): boolean {
     const { role, content } = m as { role?: unknown; content?: unknown };
     if (role === "user" || !Array.isArray(content)) return false;
     return content.some((deel) =>
-      !!deel && typeof deel === "object" && (deel as { type?: unknown }).type === "image_url"
+      !!deel && typeof deel === "object" &&
+      (deel as { type?: unknown }).type === "image_url"
     );
   });
 }
@@ -168,17 +169,30 @@ function leesSleutel(naam: AiProvider, opties: AiOpties): string | undefined {
   }
 }
 
-async function roep(hook: AiOpties["bijSucces"], poging: AiPoging): Promise<void> {
+async function roep(
+  hook: AiOpties["bijSucces"],
+  poging: AiPoging,
+): Promise<void> {
   if (!hook) return;
   try {
     await hook(poging);
   } catch (e) {
-    console.warn(`[ai:${poging.label}] hook faalde: ${e instanceof Error ? e.message : String(e)}`);
+    console.warn(
+      `[ai:${poging.label}] hook faalde: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
   }
 }
 
-function combineerSignalen(timeoutMs?: number, extern?: AbortSignal): AbortSignal | undefined {
-  const signalen = [timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined, extern]
+function combineerSignalen(
+  timeoutMs?: number,
+  extern?: AbortSignal,
+): AbortSignal | undefined {
+  const signalen = [
+    timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+    extern,
+  ]
     .filter((s): s is AbortSignal => !!s);
   if (signalen.length === 0) return undefined;
   return signalen.length === 1 ? signalen[0] : AbortSignal.any(signalen);
@@ -194,7 +208,10 @@ function combineerSignalen(timeoutMs?: number, extern?: AbortSignal): AbortSigna
  * - Faalt alles, dan volgt een `AiOnbeschikbaar` met de beschikbare sleutels en
  *   de laatste fout in de melding.
  */
-export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiAntwoord> {
+export async function callAi(
+  messages: unknown[],
+  opties: AiOpties,
+): Promise<AiAntwoord> {
   const {
     label,
     maxTokens = 1000,
@@ -213,20 +230,35 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
     const sleutel = leesSleutel(naam, opties)!;
 
     if (naam === "deepseek" && opties.beeld && heeftBeeldInSysteem(messages)) {
-      laatsteFout = "DeepSeek vision overgeslagen: beeld zit in een system-bericht";
+      laatsteFout =
+        "DeepSeek vision overgeslagen: beeld zit in een system-bericht";
       console.warn(`[ai:${label}] ${laatsteFout}`);
       continue;
     }
 
     const model = naam === "lovable"
       ? opties.lovableModel ?? STANDAARD_MODELLEN.lovable
-      : opties.deepseekModel ?? (opties.beeld ? STANDAARD_MODELLEN.deepseekBeeld : STANDAARD_MODELLEN.deepseek);
-    const provider = naam === "deepseek" && opties.beeld ? "deepseek-vision" : naam;
+      : opties.deepseekModel ??
+        (opties.beeld
+          ? STANDAARD_MODELLEN.deepseekBeeld
+          : STANDAARD_MODELLEN.deepseek);
+    const provider = naam === "deepseek" && opties.beeld
+      ? "deepseek-vision"
+      : naam;
 
     const body: Record<string, unknown> = naam === "deepseek"
-      ? bouwDeepseekBody({ model, messages, maxTokens, temperature, denken: opties.deepseekDenken })
+      ? bouwDeepseekBody({
+        model,
+        messages,
+        maxTokens,
+        temperature,
+        denken: opties.deepseekDenken,
+      })
       : { model, messages, max_tokens: maxTokens, temperature };
-    if (opties.tools && (opties.toolsVoor ?? ["lovable", "deepseek"]).includes(naam)) {
+    if (
+      opties.tools &&
+      (opties.toolsVoor ?? ["lovable", "deepseek"]).includes(naam)
+    ) {
       body.tools = opties.tools;
       if (opties.toolChoice !== undefined) body.tool_choice = opties.toolChoice;
     }
@@ -238,7 +270,10 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
       try {
         const resp = await fetch(ENDPOINT[naam], {
           method: "POST",
-          headers: { Authorization: `Bearer ${sleutel}`, "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${sleutel}`,
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify(body),
           signal: combineerSignalen(opties.timeoutMs, opties.signal),
         });
@@ -248,8 +283,17 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
           laatsteFout = `${provider} gaf ${resp.status}`;
           laatsteStatus = resp.status;
           console.warn(`[ai:${label}] ${laatsteFout} ${detail}`);
-          await roep(opties.bijFout, { ...basis, duurMs: Date.now() - start, status: resp.status, fout: `${laatsteFout} ${detail}`.trim() });
-          if (naam === "lovable" && (resp.status === 429 || resp.status === 402) && opties.opQuotum === "throw") {
+          await roep(opties.bijFout, {
+            ...basis,
+            duurMs: Date.now() - start,
+            status: resp.status,
+            fout: `${laatsteFout} ${detail}`.trim(),
+          });
+          if (
+            naam === "lovable" &&
+            (resp.status === 429 || resp.status === 402) &&
+            opties.opQuotum === "throw"
+          ) {
             throw new AiQuotumFout(resp.status);
           }
           herkansing = resp.status >= 500 || resp.status === 429;
@@ -260,11 +304,25 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
           const finishReason: string | undefined = keuze?.finish_reason;
           const toolCalls = keuze?.message?.tool_calls;
           const content: string = keuze?.message?.content || "";
-          const verslag = { ...basis, duurMs: Date.now() - start, status: resp.status, finishReason, usage };
+          const verslag = {
+            ...basis,
+            duurMs: Date.now() - start,
+            status: resp.status,
+            finishReason,
+            usage,
+          };
 
           if (Array.isArray(toolCalls) && toolCalls.length > 0) {
             await roep(opties.bijSucces, verslag);
-            return { content, toolCall: toolCalls[0], toolCalls, provider, model, finishReason, usage };
+            return {
+              content,
+              toolCall: toolCalls[0],
+              toolCalls,
+              provider,
+              model,
+              finishReason,
+              usage,
+            };
           }
           if (content && finishReason === "length" && !laatste) {
             laatsteFout = `${provider} afgekapt op max_tokens`;
@@ -282,18 +340,31 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
             break;
           }
 
-          laatsteFout = `${provider} gaf lege inhoud (finish_reason=${finishReason})`;
+          laatsteFout =
+            `${provider} gaf lege inhoud (finish_reason=${finishReason})`;
           console.warn(`[ai:${label}] ${laatsteFout}, poging ${poging}`);
           await roep(opties.bijFout, { ...verslag, fout: laatsteFout });
           herkansing = true;
         }
       } catch (err) {
         if (err instanceof AiQuotumFout) throw err;
-        const afgebroken = err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
-        laatsteFout = `${provider}: ${afgebroken ? "afgebroken (timeout of deadline)" : err instanceof Error ? err.message : String(err)}`;
+        const afgebroken = err instanceof DOMException &&
+          (err.name === "TimeoutError" || err.name === "AbortError");
+        laatsteFout = `${provider}: ${
+          afgebroken
+            ? "afgebroken (timeout of deadline)"
+            : err instanceof Error
+            ? err.message
+            : String(err)
+        }`;
         laatsteStatus = 0;
         console.warn(`[ai:${label}] ${laatsteFout}`);
-        await roep(opties.bijFout, { ...basis, duurMs: Date.now() - start, status: 0, fout: laatsteFout });
+        await roep(opties.bijFout, {
+          ...basis,
+          duurMs: Date.now() - start,
+          status: 0,
+          fout: laatsteFout,
+        });
         if (opties.signal?.aborted) break;
       }
 
@@ -304,7 +375,9 @@ export async function callAi(messages: unknown[], opties: AiOpties): Promise<AiA
   }
 
   throw new AiOnbeschikbaar(
-    `No AI provider available (sleutels: ${beschikbaar.join("+") || "geen"}${laatsteFout ? `; laatste fout: ${laatsteFout}` : ""})`,
+    `No AI provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
+      laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
+    })`,
     laatsteStatus,
   );
 }
