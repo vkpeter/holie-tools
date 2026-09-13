@@ -124,6 +124,10 @@ await bouwMcpBundel(root);
   `"prepare": "git config core.hooksPath .githooks 2>/dev/null || true"` in
   `package.json` zet hem bij elke install aan, zonder handwerk per clone.
 
+> ⚠️ `aliasesUitTsconfig` leest enkel `tsconfig.json`, niet de bestanden waar die via `references`
+> naar verwijst (`tsconfig.app.json` en dergelijke). Staan je `paths` enkel daar, zet ze dan ook in
+> `tsconfig.json` of geef de aliassen mee via de Vite-config.
+
 ## Ontwikkelen
 
 ```bash
