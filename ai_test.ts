@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { AiOnbeschikbaar, AiQuotumFout, callAi, heeftBeeldInSysteem, type AiPoging } from "./mod.ts";
+import { AiOnbeschikbaar, AiQuotumFout, callAi, heeftBeeldInSysteem, type AiPoging } from "./ai.ts";
 
 type Antwoord = { status?: number; content?: string; finish?: string; toolCall?: unknown };
 

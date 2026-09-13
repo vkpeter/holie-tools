@@ -1,11 +1,15 @@
 {
-  "name": "@holie/ai-keten",
+  "name": "@holie/tools",
   "version": "0.1.0",
   "license": "MIT",
-  "exports": "./mod.ts",
+  "exports": {
+    "./ai": "./ai.ts",
+    "./talen": "./talen.ts"
+  },
   "publish": {
     "include": [
-      "mod.ts",
+      "ai.ts",
+      "talen.ts",
       "README.md",
       "LICENSE"
     ]

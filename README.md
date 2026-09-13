@@ -1,4 +1,10 @@
-# ai-keten
+# @holie/tools
+
+Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
+`@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen` (welke talen
+een site kent, aanbiedt en actief gebruikt).
+
+## ai
 
 Een kleine providerketen voor chat-completions, voor Deno en Supabase Edge Functions.
 
@@ -7,7 +13,7 @@ of afgekapte inhoud, of een antwoord dat je zelf afkeurt. Ondersteunt de Lovable
 DeepSeek, allebei OpenAI-compatibel. Geen dependencies.
 
 ```ts
-import { callAi } from "jsr:@holie/ai-keten@0.1";
+import { callAi } from "jsr:@holie/tools@0.1/ai";
 
 const { content, provider } = await callAi(
   [
@@ -66,6 +72,16 @@ zet dan `deepseekDenken: true`.
 | `bijSucces`, `bijFout` | geen | hooks per poging, bv. om verbruik te loggen; een fout erin wordt genegeerd |
 
 Het antwoord: `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
+
+## talen
+
+```ts
+import { doelTalen, normaliseerInstelling } from "jsr:@holie/tools@0.1/talen";
+```
+
+Pure logica zonder imports: een catalogus van talen, welke daarvan beschikbaar zijn (oude
+links blijven werken) en welke actief zijn (wat de bezoeker ziet en waarnaar vertaald wordt).
+Elke site kiest zijn eigen actieve talen.
 
 ## Ontwikkelen
 
