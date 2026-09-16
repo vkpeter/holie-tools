@@ -308,6 +308,21 @@ de logica van een bot) blijft in het project.
 ## Ontwikkelen
 
 ```bash
-deno test
+deno task test   # = deno test --allow-env --allow-read --allow-write
 deno lint
+deno fmt         # vóór een versietag: de publish-workflow draait fmt --check
 ```
+
+⚠️ **Gebruik `deno task test`, niet het kale `deno test`.** Zonder
+`--allow-env --allow-read --allow-write` falen de drie bestandstests in
+`mcp-bundel_test.ts` op een permissiefout, en dat leest als drie stukke tests.
+Gemeten 16-09-2026: een sessie concludeerde daardoor dat er drie tests kapot
+stonden, hield dat staande na een `git stash`-controle (die beide keren
+hetzelfde foute commando gebruikte) en gaf het door als openstaand punt. De
+CI-workflows draaien wél met die vlaggen, dus daar stonden ze groen - een
+verschil dat je pas ziet als je de twee naast elkaar legt.
+
+⚠️ **`deno fmt` vóór je een versietag zet.** `publish.yml` draait
+`deno fmt --check` en weigert anders te publiceren. Een tag verplaatsen kan niet
+(er staat een repository rule op tags), dus dan is een nieuwe patchversie de
+enige weg - dat kostte `v0.5.0`.
