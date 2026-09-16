@@ -417,7 +417,7 @@ Deno.test("transcribeert via Lovable met het audiomodel", async () => {
     });
     assertEquals(r.tekst, "twee sneden brood");
     assertEquals(r.provider, "lovable");
-    assertEquals(r.model, STANDAARD_MODELLEN.lovableAudio);
+    assertEquals(r.model, STANDAARD_MODELLEN.lovableAudio[0]);
     assert(f.aanroepen[0].url.includes("ai.gateway.lovable.dev"));
   } finally {
     f.herstel();
@@ -507,6 +507,101 @@ Deno.test("slaat een provider zonder sleutel over", async () => {
       "sleutels: geen",
     );
     assertEquals(f.aanroepen.length, 0);
+  } finally {
+    f.herstel();
+  }
+});
+
+// --- audio: de modellenketen ------------------------------------------------
+// Er is maar EEN provider die audio kan, dus de terugval is een ander MODEL bij
+// dezelfde gateway. Peter, 16-09-2026: 2.5-flash-lite als standaard (goedkoopst,
+// $0,30/M audio-in) met 3.1-flash-lite ($0,50) eronder.
+
+Deno.test("gebruikt standaard het goedkoopste audiomodel", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels,
+    });
+    assertEquals(r.model, "google/gemini-2.5-flash-lite");
+    assertEquals(f.aanroepen[0].body.model, "google/gemini-2.5-flash-lite");
+  } finally {
+    f.herstel();
+  }
+});
+
+// ☠️ De reden dat er een keten is: 2.5-flash-lite verloopt op 28-01-2027. Valt het
+// weg met een 4xx, dan moet spraak blijven werken op het volgende model.
+Deno.test("valt bij een 4xx door naar het volgende audiomodel", async () => {
+  const f = metAntwoorden({ status: 404 }, { content: "twee sneden brood" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels,
+    });
+    assertEquals(r.tekst, "twee sneden brood");
+    assertEquals(r.model, "google/gemini-3.1-flash-lite");
+    assertEquals(f.aanroepen.length, 2);
+    assertEquals(f.aanroepen[0].body.model, "google/gemini-2.5-flash-lite");
+    assertEquals(f.aanroepen[1].body.model, "google/gemini-3.1-flash-lite");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("valt ook bij een 5xx door naar het volgende audiomodel", async () => {
+  const f = metAntwoorden({ status: 500 }, { content: "ok" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels,
+    });
+    assertEquals(r.model, "google/gemini-3.1-flash-lite");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("een enkele model-string blijft werken", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      model: "google/gemini-3-flash-preview",
+      sleutels,
+    });
+    assertEquals(r.model, "google/gemini-3-flash-preview");
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("geeft op als elk audiomodel faalt", async () => {
+  const f = metAntwoorden({ status: 500 });
+  try {
+    await assertRejects(
+      () =>
+        transcribeerAudio({
+          label: "t",
+          base64: "AAAA",
+          formaat: "wav",
+          sleutels,
+        }),
+      AiOnbeschikbaar,
+      "No audio provider available",
+    );
+    // Beide modellen geprobeerd, niet blijven hangen op het eerste.
+    assertEquals(f.aanroepen.length, 2);
   } finally {
     f.herstel();
   }

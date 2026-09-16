@@ -21,34 +21,44 @@ export const STANDAARD_MODELLEN = {
   deepseek: "deepseek-v4-flash",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
   /**
-   * Spraak naar tekst. Enkel Lovable: DeepSeek verwerkt geen audio, dus hier
-   * bestaat geen providerkeuze - zie `transcribeerAudio`.
+   * Spraak naar tekst, in volgorde van voorkeur. Enkel Lovable: DeepSeek verwerkt
+   * geen audio, dus de keten loopt hier over MODELLEN bij dezelfde provider in
+   * plaats van over providers - zie `transcribeerAudio`.
    *
-   * ⚠️ DE PRIJS ZIT OP DE AUDIO-MODALITEIT, NIET OP TEKST. Deze constante stond
-   * eerst op 3-flash-preview en daarna kort op 2.5-flash, met "40% goedkoper" als
-   * motivering. Dat was fout: die $0,30 is het TEKST-tarief. De gateway rekent
-   * audio apart aan (`pricing.input.audio` in GET /v1/models, publiek), en daar
-   * kosten 2.5-flash en 3-flash-preview allebei $1,00/M. Gemeten 16-09-2026, per
-   * M audio-input:
-   *     gemini-3.1-flash-lite   $0,50  (uit $1,50)   <- deze
-   *     gemini-2.5-flash-lite   $0,30  (uit $0,40)   deprecated
-   *     gemini-2.5-flash        $1,00  (uit $2,50)   deprecated
+   * ⚠️ DE PRIJS ZIT OP DE AUDIO-MODALITEIT, NIET OP TEKST. Deze lijst stond eerst
+   * op 3-flash-preview en daarna kort op 2.5-flash, met "40% goedkoper" als
+   * motivering. Dat was fout: die $0,30 was het TEKST-tarief. De gateway rekent
+   * audio apart aan (`pricing.input.audio` in GET /v1/models, publiek op te
+   * vragen). Gemeten 16-09-2026, per M audio-input:
+   *     gemini-2.5-flash-lite   $0,30  (uit $0,40)   <- standaard
+   *     gemini-3.1-flash-lite   $0,50  (uit $1,50)   <- terugval
+   *     gemini-2.5-flash        $1,00  (uit $2,50)
    *     gemini-3-flash-preview  $1,00  (uit $3,00)
-   * ⛔ 2.5-flash-lite is goedkoper maar verloopt op 31-03-2027, en een verlopen
-   * model is geen besparing. 3.1-flash-lite is het enige goedkopere dat blijft.
+   * De twee die hier eerder stonden waren dus de duurste van het stel.
    *
-   * ☠️ RECHTVAARDIG DIT MODEL NIET OP KWALITEIT. Bij een test met zeven ingesproken
-   * zinnen (16-09-2026) maakten beide toen geteste modellen een fout: 2.5-flash
-   * miste een "twee" en gaf "Mmm." op gemompel, 3-flash-preview verzon op drie
-   * seconden STILTE een volledig cannelloni-recept van ruim 1500 kcal. Dit model
-   * is op die zinnen NIET getoetst.
+   * ☠️ 2.5-flash-lite IS DEPRECATED EN VERLOOPT OP 28-01-2027. Dat is bewust
+   * aanvaard (Peter, 16-09-2026): het is de goedkoopste, en 3.1-flash-lite staat
+   * eronder als vangnet zodat spraak blijft werken wanneer het eerste model
+   * wegvalt. ⚠️ Die terugval maakt de vervaldatum minder scherp, maar niet
+   * onschuldig: zodra 2.5-flash-lite stopt, betaal je stilzwijgend het duurdere
+   * tarief. Controleer de lijst rond die datum.
+   *
+   * ☠️ RECHTVAARDIG DEZE MODELLEN NIET OP KWALITEIT. Bij een test met zeven
+   * ingesproken zinnen (16-09-2026) maakten de twee toen geteste modellen allebei
+   * een fout: 2.5-flash miste een "twee" en gaf "Mmm." op gemompel,
+   * 3-flash-preview verzon op drie seconden STILTE een volledig cannelloni-recept
+   * van ruim 1500 kcal. Geen van de modellen in deze lijst is op die zinnen
+   * getoetst.
    *
    * ⛔ Reken dus niet op het model om te weigeren. Een transcriptiemodel dat
    * twijfelt vult plausibel aan; de AANROEPER hoort te toetsen of de hoeveelheid
-   * tekst bij de duur van de opname past. Dat vangnet is hier meer waard dan de
+   * tekst bij de duur van de opname past. Dat vangnet is meer waard dan de
    * modelkeuze zelf, want het werkt ongeacht wat hier staat.
    */
-  lovableAudio: "google/gemini-3.1-flash-lite",
+  lovableAudio: [
+    "google/gemini-2.5-flash-lite",
+    "google/gemini-3.1-flash-lite",
+  ],
 } as const;
 
 /** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
@@ -499,8 +509,11 @@ export interface AudioOpties {
   temperature?: number;
   /** Providers in volgorde. Standaard `AUDIO_PROVIDERS`. */
   volgorde?: AiProvider[];
-  /** Model bij Lovable. Standaard `STANDAARD_MODELLEN.lovableAudio`. */
-  model?: string;
+  /**
+   * Model of modellen bij Lovable, in volgorde van voorkeur. Standaard
+   * `STANDAARD_MODELLEN.lovableAudio`. Een enkele string mag ook.
+   */
+  model?: string | string[];
   /** Pogingen per provider, standaard 1. */
   pogingen?: number;
   timeoutMs?: number;
@@ -546,7 +559,14 @@ export async function transcribeerAudio(
   }
 
   const volgorde = opties.volgorde ?? AUDIO_PROVIDERS;
-  const model = opties.model ?? STANDAARD_MODELLEN.lovableAudio;
+  // De keten loopt hier over modellen, niet over providers: er is er maar een die
+  // audio kan, en de terugval is een ander model bij diezelfde gateway.
+  const modellen =
+    (Array.isArray(opties.model)
+      ? opties.model
+      : opties.model
+      ? [opties.model]
+      : [...STANDAARD_MODELLEN.lovableAudio]).filter(Boolean);
   const pogingen = Math.max(1, opties.pogingen ?? 1);
   const taalhint = opties.taal ? ` Taalhint: ${opties.taal}.` : "";
   const opdracht = opties.opdracht ??
@@ -561,83 +581,91 @@ export async function transcribeerAudio(
     if (!sleutel) continue;
     beschikbaar.push(provider);
 
-    for (let poging = 1; poging <= pogingen; poging++) {
-      const start = Date.now();
-      let status = 0;
-      try {
-        const resp = await fetch(ENDPOINT[provider], {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${sleutel}`,
-            "Content-Type": "application/json",
-          },
-          signal: combineerSignalen(opties.timeoutMs, opties.signal),
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: opties.systeem ?? AUDIO_SYSTEEM },
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "input_audio",
-                    input_audio: {
-                      data: opties.base64,
-                      format: opties.formaat,
+    for (const model of modellen) {
+      for (let poging = 1; poging <= pogingen; poging++) {
+        const start = Date.now();
+        let status = 0;
+        try {
+          const resp = await fetch(ENDPOINT[provider], {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${sleutel}`,
+              "Content-Type": "application/json",
+            },
+            signal: combineerSignalen(opties.timeoutMs, opties.signal),
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: "system", content: opties.systeem ?? AUDIO_SYSTEEM },
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_audio",
+                      input_audio: {
+                        data: opties.base64,
+                        format: opties.formaat,
+                      },
                     },
-                  },
-                  { type: "text", text: opdracht },
-                ],
-              },
-            ],
-            max_tokens: opties.maxTokens ?? 500,
-            temperature: opties.temperature ?? 0.1,
-          }),
-        });
-        status = resp.status;
-        const data = await resp.json().catch(() => ({}));
-        const tekst = data?.choices?.[0]?.message?.content ?? "";
-        const duurMs = Date.now() - start;
+                    { type: "text", text: opdracht },
+                  ],
+                },
+              ],
+              max_tokens: opties.maxTokens ?? 500,
+              temperature: opties.temperature ?? 0.1,
+            }),
+          });
+          status = resp.status;
+          const data = await resp.json().catch(() => ({}));
+          const tekst = data?.choices?.[0]?.message?.content ?? "";
+          const duurMs = Date.now() - start;
 
-        if (!resp.ok || !tekst) {
-          laatsteStatus = status;
-          laatsteFout = `${provider} gaf ${status}${
-            tekst ? "" : " (lege inhoud)"
-          }`;
-          console.warn(`[audio:${opties.label}] ${laatsteFout}`);
+          if (!resp.ok || !tekst) {
+            laatsteStatus = status;
+            laatsteFout = `${provider} gaf ${status}${
+              tekst ? "" : " (lege inhoud)"
+            }`;
+            console.warn(`[audio:${opties.label}] ${laatsteFout}`);
+            await roep(opties.bijSucces, {
+              label: opties.label,
+              provider,
+              model,
+              duurMs,
+              status,
+              fout: laatsteFout,
+            });
+            // Een 5xx, 429 of leeg antwoord is tijdelijk: opnieuw bij hetzelfde
+            // model. Een 4xx betekent dat DIT model het niet aankan (ingetrokken,
+            // formaat geweigerd) - dan heeft herkansen geen zin en is het volgende
+            // model aan de beurt. ⚠️ Zonder die tweede tak zou een ingetrokken
+            // standaardmodel de hele spraakweg platleggen terwijl de terugval klaarstaat.
+            if (status === 429 || status >= 500 || !tekst) continue;
+            break;
+          }
+
           await roep(opties.bijSucces, {
             label: opties.label,
             provider,
             model,
             duurMs,
             status,
+            usage: data?.usage,
+            lengte: tekst.length,
+          });
+          return { tekst, provider, model, usage: data?.usage };
+        } catch (e) {
+          laatsteFout = `${provider}: ${foutTekst(e)}`;
+          console.warn(`[audio:${opties.label}] ${laatsteFout}`);
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs: Date.now() - start,
+            status,
             fout: laatsteFout,
           });
-          if (status === 429 || status >= 500 || !tekst) continue;
-          break;
         }
-
-        await roep(opties.bijSucces, {
-          label: opties.label,
-          provider,
-          model,
-          duurMs,
-          status,
-          usage: data?.usage,
-          lengte: tekst.length,
-        });
-        return { tekst, provider, model, usage: data?.usage };
-      } catch (e) {
-        laatsteFout = `${provider}: ${foutTekst(e)}`;
-        console.warn(`[audio:${opties.label}] ${laatsteFout}`);
-        await roep(opties.bijSucces, {
-          label: opties.label,
-          provider,
-          model,
-          duurMs: Date.now() - start,
-          status,
-          fout: laatsteFout,
-        });
+        if (opties.signal?.aborted) break;
       }
       if (opties.signal?.aborted) break;
     }

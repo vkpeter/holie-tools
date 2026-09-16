@@ -78,6 +78,33 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
 
+## Nieuw in 0.4.0 (ai): audio kiest zijn model, met terugval
+
+`STANDAARD_MODELLEN.lovableAudio` is nu een **lijst** in volgorde van voorkeur,
+en `transcribeerAudio` loopt die af. Er is maar een provider die audio kan, dus
+de keten loopt hier over **modellen** bij dezelfde gateway in plaats van over
+providers.
+
+```
+gemini-2.5-flash-lite   $0,30/M audio-in  (uit $0,40)   standaard
+gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
+```
+
+- **De prijs zit op de audio-modaliteit, niet op tekst.** Vraag
+  `GET https://ai.gateway.lovable.dev/v1/models` op en lees
+  `pricing.input.audio`. Gemeten 16-09-2026 kostten `gemini-2.5-flash` en
+  `gemini-3-flash-preview` allebei **$1,00/M** audio-input terwijl hun
+  tekst-tarieven 40% verschilden: een keuze op de tekstprijs zegt hier dus
+  niets.
+- **Waarom een terugval:** `2.5-flash-lite` is het goedkoopst maar **deprecated,
+  en verloopt op 28-01-2027**. Valt het weg met een 4xx, dan schuift de keten
+  door naar het volgende model in plaats van de hele spraakweg plat te leggen.
+  Een 5xx, 429 of leeg antwoord wordt eerst herkanst bij hetzelfde model.
+- `model` aanvaardt nog steeds een enkele string; dat pad verandert niet.
+
+⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
+leest nu een array. Neem `[0]` voor het voorkeursmodel.
+
 ## Nieuw in 0.3.0 (ai): spraak naar tekst
 
 `transcribeerAudio(opties)` zet spraak om naar tekst. Het staat naast `callAi`,
