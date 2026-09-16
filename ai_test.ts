@@ -3,9 +3,11 @@ import {
   AiOnbeschikbaar,
   type AiPoging,
   AiQuotumFout,
+  BeeldGeweigerd,
   bouwDeepseekBody,
   callAi,
   foutTekst,
+  genereerBeeld,
   heeftBeeldInSysteem,
   STANDAARD_MODELLEN,
   transcribeerAudio,
@@ -605,4 +607,165 @@ Deno.test("geeft op als elk audiomodel faalt", async () => {
   } finally {
     f.herstel();
   }
+});
+
+// --- genereerBeeld -----------------------------------------------------------
+// Beeld kan alleen naar Lovable: DeepSeek genereert geen beelden. Deze tests
+// leggen de drie regels vast die geld of een stille storing gekost hebben, en die
+// elke herschrijving moeten overleven.
+
+/** Mock die beeld-antwoorden teruggeeft, of tekst wanneer `content` gezet is. */
+function metBeeld(
+  ...antwoorden: {
+    dataUrl?: string;
+    content?: string;
+    status?: number;
+    gooi?: unknown;
+  }[]
+) {
+  const aanroepen: { url: string; body: Record<string, unknown> }[] = [];
+  let i = 0;
+  const origineel = globalThis.fetch;
+  globalThis.fetch = ((url: string, init: RequestInit) => {
+    aanroepen.push({ url, body: JSON.parse(String(init.body)) });
+    const a = antwoorden[Math.min(i++, antwoorden.length - 1)];
+    if (a.gooi) return Promise.reject(a.gooi);
+    const message = a.dataUrl
+      ? { images: [{ image_url: { url: a.dataUrl } }] }
+      : { content: a.content ?? "" };
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({ choices: [{ message }], usage: { total_tokens: 9 } }),
+        { status: a.status ?? 200 },
+      ),
+    );
+  }) as typeof fetch;
+  return { aanroepen, herstel: () => (globalThis.fetch = origineel) };
+}
+
+/** Een geldige 1x1 PNG als data-URL. */
+const PNG_1X1 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+Deno.test("genereert een beeld via Lovable met het beeldmodel", async () => {
+  const f = metBeeld({ dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({ label: "t", prompt: "een eend", sleutels });
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.model, STANDAARD_MODELLEN.lovableBeeld[0]);
+    assertEquals(r.mimeType, "image/png");
+    assert(r.bytes.length > 0);
+    assert(f.aanroepen[0].url.includes("ai.gateway.lovable.dev"));
+    assertEquals(f.aanroepen[0].body.modalities, ["image", "text"]);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("valt bij een foutstatus door naar het volgende model", async () => {
+  // Een foutstatus betekent dat de gateway niets gerenderd en dus niets
+  // aangerekend heeft: het volgende model mag het proberen.
+  const f = metBeeld({ status: 500 }, { dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({ label: "t", prompt: "x", sleutels });
+    assertEquals(r.model, STANDAARD_MODELLEN.lovableBeeld[1]);
+    assertEquals(f.aanroepen.length, 2);
+    assertEquals(f.aanroepen[0].body.model, STANDAARD_MODELLEN.lovableBeeld[0]);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
+  // Een beeld dat server-side al gerenderd is, is al aangerekend, ook als het
+  // antwoord ons nooit bereikt. Een tweede poging betekent twee keer betalen.
+  const f = metBeeld({ gooi: new Error("socket hang up") }, { dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () => genereerBeeld({ label: "t", prompt: "x", sleutels }),
+      AiOnbeschikbaar,
+    );
+    assertEquals(f.aanroepen.length, 1, "er mag maar EEN aanroep gedaan zijn");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("REGEL 2: valt bij 402 NIET door naar het volgende model", async () => {
+  // 402 gaat over de rekening, niet over het model: doorvallen raakt dezelfde
+  // muur nog een keer en maakt de fout onleesbaar.
+  const f = metBeeld({ status: 402 }, { dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () => genereerBeeld({ label: "t", prompt: "x", sleutels }),
+      AiQuotumFout,
+    );
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("REGEL 2: doet hetzelfde bij 403 (creditlimiet workspace)", async () => {
+  const f = metBeeld({ status: 403 }, { dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () => genereerBeeld({ label: "t", prompt: "x", sleutels }),
+      AiQuotumFout,
+    );
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("REGEL 3: tekst in plaats van beeld is een weigering", async () => {
+  // Die poging IS aangerekend, en het is een inhoudelijke weigering: herkansen
+  // bij hetzelfde model heeft geen zin.
+  const f = metBeeld(
+    { content: "I cannot generate that image." },
+    { dataUrl: PNG_1X1 },
+  );
+  try {
+    const err = await assertRejects(
+      () => genereerBeeld({ label: "t", prompt: "x", sleutels }),
+      BeeldGeweigerd,
+    );
+    assert(err.message.includes("cannot generate"));
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("weigert een beeld dat boven maxBytes uitkomt", async () => {
+  const f = metBeeld({ dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () => genereerBeeld({ label: "t", prompt: "x", maxBytes: 10, sleutels }),
+      AiOnbeschikbaar,
+    );
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("de terugval kost evenveel als het eerste model", () => {
+  // Springt de terugval in omdat het eerste model wegvalt, dan mag dat de kost
+  // niet verdubbelen. Dit legt de afspraak vast, niet de prijs zelf: die staat
+  // in het commentaar bij STANDAARD_MODELLEN met de meetdatum erbij.
+  assertEquals(STANDAARD_MODELLEN.lovableBeeld.length, 2);
+  assertEquals(
+    STANDAARD_MODELLEN.lovableBeeld[0],
+    "google/gemini-3.1-flash-lite-image",
+  );
+  assertEquals(
+    STANDAARD_MODELLEN.lovableBeeld[1],
+    "google/gemini-2.5-flash-image",
+  );
+  // Geen OpenAI-modellen (Peter, 16-09-2026).
+  assert(
+    STANDAARD_MODELLEN.lovableBeeld.every((m) => m.startsWith("google/")),
+    "geen OpenAI-modellen in de beeldlijst",
+  );
 });

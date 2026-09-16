@@ -105,6 +105,52 @@ gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
 ⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
 leest nu een array. Neem `[0]` voor het voorkeursmodel.
 
+## Nieuw in 0.5.0 (ai): beeldgeneratie
+
+`genereerBeeld(opties)` maakt een beeld en geeft de bytes terug. Net als
+`transcribeerAudio` staat het naast `callAi` en niet erin: DeepSeek genereert
+geen beelden, dus de keten loopt hier over **modellen** bij dezelfde provider in
+plaats van over providers.
+
+```ts
+import { genereerBeeld } from "jsr:@holie/tools@^0.5/ai";
+
+const { bytes, mimeType, model } = await genereerBeeld({
+  label: "telegram-webhook",
+  prompt: "A wide landscape photo of a duck on a canal, no text",
+});
+```
+
+Drie regels zitten erin ingebakken. Ze komen uit Eendjes `article-image.ts`,
+waar ze allemaal een keer geld of een stille storing gekost hebben:
+
+- **Nooit opnieuw proberen na een timeout of netwerkfout.** Een beeld dat
+  server-side al gerenderd is, is al aangerekend, ook als het antwoord jou nooit
+  bereikt. Een herkansing betekent dus twee keer betalen. Bij een
+  HTTP-*foutstatus* ligt dat anders: dan is er niets gerenderd en niets
+  aangerekend, en mag het volgende model wel.
+- **402 en 403 vallen niet door naar het volgende model.** Die gaan over de
+  rekening (prepaid potje leeg, of de creditlimiet van de workspace), niet over
+  het model. Er komt een `AiQuotumFout` uit, zodat de aanroeper het verschil ziet
+  tussen "geen krediet" en "model stuk".
+- **Tekst in plaats van een beeld is een weigering, geen storing.** Dat doet het
+  model wanneer het de prompt afwijst, en die poging is aangerekend. Je krijgt
+  een `BeeldGeweigerd` met de tekst erin, zodat je hem kan loggen.
+
+⚠️ **Vergelijk beeldmodellen op `pricing.output.image`**, niet op
+`pricing.input.text`: beeld wordt apart aangerekend en niet als tekst. Bij een
+artikelbeeld domineert de beelduitvoer de kost volledig. De tarieven staan met
+meetdatum in het commentaar bij `STANDAARD_MODELLEN.lovableBeeld`.
+
+⚠️ **Houd de terugval even duur als het eerste model.** Springt hij in omdat het
+eerste model wegvalt, dan mag dat de kost niet verdubbelen: dat is precies het
+moment waarop niemand naar de factuur kijkt.
+
+⚠️ **Het antwoordformaat is dat van de Gemini-modellen** op de Lovable-gateway
+(`choices[0].message.images[0].image_url.url`). Zet je er een model van een
+andere leverancier in, toets dan eerst of die veldnamen kloppen. Een terugval die
+stil breekt op het moment dat hij moet inspringen, is erger dan geen terugval.
+
 ## Nieuw in 0.3.0 (ai): spraak naar tekst
 
 `transcribeerAudio(opties)` zet spraak om naar tekst. Het staat naast `callAi`,

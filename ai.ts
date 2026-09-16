@@ -59,6 +59,42 @@ export const STANDAARD_MODELLEN = {
     "google/gemini-2.5-flash-lite",
     "google/gemini-3.1-flash-lite",
   ],
+  /**
+   * Beeldgeneratie, goedkoopste eerst. Enkel Lovable: DeepSeek is tekst-only.
+   *
+   * DE PRIJS ZIT OP DE BEELD-MODALITEIT, NIET OP TEKST. Vergelijk op
+   * `pricing.output.image` uit `GET /v1/models` (publiek, geen sleutel nodig),
+   * niet op `pricing.input.text`. Bij een artikelbeeld domineert de beelduitvoer
+   * de kost volledig, dus een model met dure tekst-input maar goedkope
+   * beelduitvoer is nog altijd de betere keuze. Gemeten 16-09-2026, per M
+   * beeld-uit:
+   *     gpt-image-1-mini              $  8   DEPRECATED, geen einddatum
+   *     gemini-2.5-flash-image        $ 30   DEPRECATED, verloopt 15-03-2027
+   *     gemini-3.1-flash-lite-image   $ 30   actief      <- standaard
+   *     gpt-image-2                   $ 30   actief
+   *     gemini-3.1-flash-image        $ 60   actief
+   *     gemini-3-pro-image            $120   actief
+   *
+   * DE TERUGVAL MOET EVEN DUUR ZIJN ALS HET EERSTE MODEL. Springt hij in omdat
+   * het eerste model wegvalt, dan mag dat de kost niet verdubbelen: dat is
+   * precies het moment waarop niemand naar de factuur kijkt.
+   * `gemini-3.1-flash-image` ($60) stond hier daarom even en is er weer uit.
+   *
+   * De oude tweede plaats bij Eendje was `gemini-3.1-flash-image-preview`, en
+   * die id BESTAAT NIET op de gateway (nagemeten over 44 modellen). Er was daar
+   * dus feitelijk geen terugval: viel het eerste model weg, dan liep de tweede
+   * poging op een onbekend model.
+   *
+   * GEEN OpenAI-modellen (Peter, 16-09-2026). `gpt-image-2` is even duur en niet
+   * vervallend, maar staat er bewust niet in. Niet opnieuw voorstellen.
+   *
+   * Vóór 15-03-2027 verloopt de terugval. Binnen Google blijft dan enkel de
+   * $60-variant over; kijk of er tegen die tijd iets nieuws op $30 staat.
+   */
+  lovableBeeld: [
+    "google/gemini-3.1-flash-lite-image",
+    "google/gemini-2.5-flash-image",
+  ],
 } as const;
 
 /** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
@@ -674,6 +710,249 @@ export async function transcribeerAudio(
 
   throw new AiOnbeschikbaar(
     `No audio provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
+      laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
+    })`,
+    laatsteStatus,
+  );
+}
+
+/** Providers die beeld kunnen. DeepSeek is tekst-only, dus enkel Lovable. */
+export const BEELD_PROVIDERS: AiProvider[] = ["lovable"];
+
+export interface BeeldOpties {
+  /** Naam in de logregels, bv. "telegram-webhook". */
+  label: string;
+  /** De prompt voor het beeld, in het Engels. */
+  prompt: string;
+  /**
+   * Model of modellen bij Lovable, in volgorde van voorkeur. Standaard
+   * `STANDAARD_MODELLEN.lovableBeeld`. Een enkele string mag ook.
+   */
+  model?: string | string[];
+  /** Hoeveel bytes het beeld hoogstens mag zijn. Standaard 10 MB. */
+  maxBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  volgorde?: AiProvider[];
+  sleutels?: Partial<Record<AiProvider, string>>;
+  bijSucces?: (poging: AiPoging) => void | Promise<void>;
+}
+
+export interface BeeldAntwoord {
+  /** De ruwe bytes van het beeld. */
+  bytes: Uint8Array;
+  /** Het mediatype dat het model teruggaf, bv. "image/png". */
+  mimeType: string;
+  provider: AiProvider;
+  model: string;
+  usage?: AiVerbruik;
+}
+
+/**
+ * Het model antwoordde met tekst in plaats van met een beeld.
+ *
+ * Dat doet het wanneer het de prompt weigert. Die poging IS aangerekend, en het
+ * is een inhoudelijke weigering, geen storing: herkansen bij hetzelfde model
+ * heeft dus geen zin. De tekst komt mee zodat de aanroeper hem kan loggen.
+ */
+export class BeeldGeweigerd extends Error {
+  readonly tekst: string;
+  readonly model: string;
+  constructor(model: string, tekst: string) {
+    super(
+      `Model ${model} gaf tekst in plaats van een beeld: ${tekst.slice(0, 200)}`,
+    );
+    this.name = "BeeldGeweigerd";
+    this.model = model;
+    this.tekst = tekst;
+  }
+}
+
+/**
+ * Genereert een beeld en geeft de bytes terug.
+ *
+ * Verhuisd uit Eendjes `supabase/functions/_shared/article-image.ts` op
+ * 16-09-2026, zodat alle AI-calls van Holie via dit pakket lopen.
+ *
+ * Dit loopt NIET via `callAi`: DeepSeek genereert geen beelden, dus de keten
+ * loopt hier over MODELLEN bij dezelfde provider in plaats van over providers,
+ * net als bij `transcribeerAudio`.
+ *
+ * Drie regels die met bloed geschreven zijn en die elke herschrijving moeten
+ * overleven. Ze komen uit de Eendje-implementatie, waar ze allemaal een keer
+ * geld of een stille storing gekost hebben:
+ *
+ * 1. NOOIT OPNIEUW PROBEREN NA EEN TIMEOUT OF NETWERKFOUT. Een beeld dat
+ *    server-side al gerenderd is, is al aangerekend, ook als het antwoord jou
+ *    nooit bereikt. Een herkansing betekent dan twee keer betalen. Bij een
+ *    HTTP-FOUTSTATUS ligt dat anders: dan heeft de gateway niets gerenderd en
+ *    niets aangerekend, en mag het volgende model wel.
+ * 2. BIJ 402 OF 403 NIET DOORVALLEN naar het volgende model. Die statussen gaan
+ *    over de rekening (prepaid potje leeg, of de creditlimiet van de workspace),
+ *    niet over het model. Doorvallen raakt dezelfde muur nog een keer en maakt
+ *    de fout onleesbaar. Er komt een `AiQuotumFout` uit, zodat de aanroeper het
+ *    verschil ziet tussen "geen krediet" en "model stuk".
+ * 3. HET MODEL KAN MET TEKST ANTWOORDEN in plaats van met een beeld. Zie
+ *    `BeeldGeweigerd`.
+ *
+ * Het antwoordformaat is dat van de Gemini-modellen op de Lovable-gateway:
+ * `choices[0].message.images[0].image_url.url` als data-URL. Zet je hier ooit een
+ * model van een andere leverancier in, toets dan EERST of die veldnamen kloppen.
+ * Een terugval die stil breekt op het moment dat hij moet inspringen, is erger
+ * dan geen terugval.
+ */
+export async function genereerBeeld(
+  opties: BeeldOpties,
+): Promise<BeeldAntwoord> {
+  const volgorde = opties.volgorde ?? BEELD_PROVIDERS;
+  const modellen = (Array.isArray(opties.model)
+    ? opties.model
+    : opties.model
+    ? [opties.model]
+    : [...STANDAARD_MODELLEN.lovableBeeld]).filter(Boolean);
+  const maxBytes = opties.maxBytes ?? 10 * 1024 * 1024;
+
+  const beschikbaar: string[] = [];
+  let laatsteFout = "";
+  let laatsteStatus = 0;
+
+  for (const provider of volgorde) {
+    const sleutel = leesSleutel(provider, opties as unknown as AiOpties);
+    if (!sleutel) continue;
+    beschikbaar.push(provider);
+
+    for (const model of modellen) {
+      const start = Date.now();
+      let status = 0;
+      try {
+        const resp = await fetch(ENDPOINT[provider], {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sleutel}`,
+            "Content-Type": "application/json",
+          },
+          signal: combineerSignalen(opties.timeoutMs, opties.signal),
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: opties.prompt }],
+            modalities: ["image", "text"],
+          }),
+        });
+        status = resp.status;
+        const duurMs = Date.now() - start;
+
+        // Regel 2: dit gaat over de rekening, niet over het model.
+        if (status === 402 || status === 403 || status === 429) {
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs,
+            status,
+            fout: `${provider} gaf ${status}`,
+          });
+          throw new AiQuotumFout(status === 429 ? 429 : 402);
+        }
+
+        const data = await resp.json().catch(() => ({}));
+
+        if (!resp.ok) {
+          laatsteStatus = status;
+          laatsteFout = `${provider} gaf ${status}`;
+          console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs,
+            status,
+            fout: laatsteFout,
+          });
+          // Een foutstatus betekent dat er niets gerenderd en dus niets
+          // aangerekend is: het volgende model mag het proberen.
+          continue;
+        }
+
+        const dataUrl = data?.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+        // Regel 3: tekst in plaats van een beeld is een weigering, geen storing.
+        if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+          const tekst = (data?.choices?.[0]?.message?.content ?? "").toString();
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs,
+            status,
+            usage: data?.usage,
+            fout: "geen beeld in het antwoord",
+          });
+          throw new BeeldGeweigerd(model, tekst);
+        }
+
+        const komma = dataUrl.indexOf(",");
+        const kop = dataUrl.slice(0, komma);
+        const puntkomma = kop.indexOf(";");
+        const mimeType = puntkomma > 5 ? kop.slice(5, puntkomma) : "image/png";
+
+        let bytes: Uint8Array;
+        try {
+          bytes = Uint8Array.from(
+            atob(dataUrl.slice(komma + 1)),
+            (c) => c.charCodeAt(0),
+          );
+        } catch {
+          laatsteStatus = status;
+          laatsteFout = "base64 niet decodeerbaar";
+          console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
+          continue;
+        }
+
+        if (bytes.length > maxBytes) {
+          laatsteStatus = 413;
+          laatsteFout = `beeld te groot (${bytes.length} bytes)`;
+          console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
+          continue;
+        }
+
+        await roep(opties.bijSucces, {
+          label: opties.label,
+          provider,
+          model,
+          duurMs,
+          status,
+          usage: data?.usage,
+          lengte: bytes.length,
+        });
+        return { bytes, mimeType, provider, model, usage: data?.usage };
+      } catch (e) {
+        // Regel 2 en 3 dragen hun eigen fout: die zijn definitief.
+        if (e instanceof AiQuotumFout || e instanceof BeeldGeweigerd) throw e;
+
+        laatsteFout = `${provider}: ${foutTekst(e)}`;
+        console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
+        await roep(opties.bijSucces, {
+          label: opties.label,
+          provider,
+          model,
+          duurMs: Date.now() - start,
+          status,
+          fout: laatsteFout,
+        });
+        // Regel 1: na een timeout of netwerkfout NIET herkansen. Het beeld kan
+        // server-side al gerenderd en dus aangerekend zijn.
+        throw new AiOnbeschikbaar(
+          `Beeldgeneratie afgebroken bij ${provider}/${model}: ${laatsteFout}. ` +
+            "Bewust GEEN herkansing: een gerenderd beeld is al aangerekend.",
+          status,
+        );
+      }
+    }
+    if (opties.signal?.aborted) break;
+  }
+
+  throw new AiOnbeschikbaar(
+    `No image provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
       laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
     })`,
     laatsteStatus,
