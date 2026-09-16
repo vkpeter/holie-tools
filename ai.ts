@@ -760,7 +760,9 @@ export class BeeldGeweigerd extends Error {
   readonly model: string;
   constructor(model: string, tekst: string) {
     super(
-      `Model ${model} gaf tekst in plaats van een beeld: ${tekst.slice(0, 200)}`,
+      `Model ${model} gaf tekst in plaats van een beeld: ${
+        tekst.slice(0, 200)
+      }`,
     );
     this.name = "BeeldGeweigerd";
     this.model = model;
@@ -805,11 +807,12 @@ export async function genereerBeeld(
   opties: BeeldOpties,
 ): Promise<BeeldAntwoord> {
   const volgorde = opties.volgorde ?? BEELD_PROVIDERS;
-  const modellen = (Array.isArray(opties.model)
-    ? opties.model
-    : opties.model
-    ? [opties.model]
-    : [...STANDAARD_MODELLEN.lovableBeeld]).filter(Boolean);
+  const modellen =
+    (Array.isArray(opties.model)
+      ? opties.model
+      : opties.model
+      ? [opties.model]
+      : [...STANDAARD_MODELLEN.lovableBeeld]).filter(Boolean);
   const maxBytes = opties.maxBytes ?? 10 * 1024 * 1024;
 
   const beschikbaar: string[] = [];
@@ -873,7 +876,8 @@ export async function genereerBeeld(
           continue;
         }
 
-        const dataUrl = data?.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+        const dataUrl = data?.choices?.[0]?.message?.images?.[0]?.image_url
+          ?.url;
 
         // Regel 3: tekst in plaats van een beeld is een weigering, geen storing.
         if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {

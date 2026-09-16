@@ -679,7 +679,9 @@ Deno.test("valt bij een foutstatus door naar het volgende model", async () => {
 Deno.test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
   // Een beeld dat server-side al gerenderd is, is al aangerekend, ook als het
   // antwoord ons nooit bereikt. Een tweede poging betekent twee keer betalen.
-  const f = metBeeld({ gooi: new Error("socket hang up") }, { dataUrl: PNG_1X1 });
+  const f = metBeeld({ gooi: new Error("socket hang up") }, {
+    dataUrl: PNG_1X1,
+  });
   try {
     await assertRejects(
       () => genereerBeeld({ label: "t", prompt: "x", sleutels }),

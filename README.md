@@ -127,12 +127,12 @@ waar ze allemaal een keer geld of een stille storing gekost hebben:
 - **Nooit opnieuw proberen na een timeout of netwerkfout.** Een beeld dat
   server-side al gerenderd is, is al aangerekend, ook als het antwoord jou nooit
   bereikt. Een herkansing betekent dus twee keer betalen. Bij een
-  HTTP-*foutstatus* ligt dat anders: dan is er niets gerenderd en niets
+  HTTP-_foutstatus_ ligt dat anders: dan is er niets gerenderd en niets
   aangerekend, en mag het volgende model wel.
 - **402 en 403 vallen niet door naar het volgende model.** Die gaan over de
   rekening (prepaid potje leeg, of de creditlimiet van de workspace), niet over
-  het model. Er komt een `AiQuotumFout` uit, zodat de aanroeper het verschil ziet
-  tussen "geen krediet" en "model stuk".
+  het model. Er komt een `AiQuotumFout` uit, zodat de aanroeper het verschil
+  ziet tussen "geen krediet" en "model stuk".
 - **Tekst in plaats van een beeld is een weigering, geen storing.** Dat doet het
   model wanneer het de prompt afwijst, en die poging is aangerekend. Je krijgt
   een `BeeldGeweigerd` met de tekst erin, zodat je hem kan loggen.
@@ -148,8 +148,9 @@ moment waarop niemand naar de factuur kijkt.
 
 ⚠️ **Het antwoordformaat is dat van de Gemini-modellen** op de Lovable-gateway
 (`choices[0].message.images[0].image_url.url`). Zet je er een model van een
-andere leverancier in, toets dan eerst of die veldnamen kloppen. Een terugval die
-stil breekt op het moment dat hij moet inspringen, is erger dan geen terugval.
+andere leverancier in, toets dan eerst of die veldnamen kloppen. Een terugval
+die stil breekt op het moment dat hij moet inspringen, is erger dan geen
+terugval.
 
 ## Nieuw in 0.3.0 (ai): spraak naar tekst
 
