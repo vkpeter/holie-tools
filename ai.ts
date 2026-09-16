@@ -23,8 +23,19 @@ export const STANDAARD_MODELLEN = {
   /**
    * Spraak naar tekst. Enkel Lovable: DeepSeek verwerkt geen audio, dus hier
    * bestaat geen providerkeuze - zie `transcribeerAudio`.
+   *
+   * ⚠️ 2.5 en niet 3-flash-preview, en dat is GEMETEN (16-09-2026, zeven
+   * ingesproken zinnen door beide modellen). Het is geen kwaliteitskeuze: allebei
+   * maakten ze een fout. 2.5-flash miste een "twee" en gaf "Mmm." op gemompel;
+   * 3-flash-preview verzon op drie seconden STILTE een volledig cannelloni-recept
+   * van ruim 1500 kcal. Dat laatste weegt zwaarder wanneer de uitkomst in een
+   * voedingslogboek belandt, en 2.5 is bovendien 40% goedkoper op input.
+   *
+   * ⛔ Reken niet op het model om te weigeren. Een transcriptiemodel dat twijfelt
+   * vult plausibel aan; de aanroeper hoort te toetsen of de hoeveelheid tekst bij
+   * de duur van de opname past.
    */
-  lovableAudio: "google/gemini-3-flash-preview",
+  lovableAudio: "google/gemini-2.5-flash",
 } as const;
 
 /** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
