@@ -24,18 +24,31 @@ export const STANDAARD_MODELLEN = {
    * Spraak naar tekst. Enkel Lovable: DeepSeek verwerkt geen audio, dus hier
    * bestaat geen providerkeuze - zie `transcribeerAudio`.
    *
-   * ⚠️ 2.5 en niet 3-flash-preview, en dat is GEMETEN (16-09-2026, zeven
-   * ingesproken zinnen door beide modellen). Het is geen kwaliteitskeuze: allebei
-   * maakten ze een fout. 2.5-flash miste een "twee" en gaf "Mmm." op gemompel;
-   * 3-flash-preview verzon op drie seconden STILTE een volledig cannelloni-recept
-   * van ruim 1500 kcal. Dat laatste weegt zwaarder wanneer de uitkomst in een
-   * voedingslogboek belandt, en 2.5 is bovendien 40% goedkoper op input.
+   * ⚠️ DE PRIJS ZIT OP DE AUDIO-MODALITEIT, NIET OP TEKST. Deze constante stond
+   * eerst op 3-flash-preview en daarna kort op 2.5-flash, met "40% goedkoper" als
+   * motivering. Dat was fout: die $0,30 is het TEKST-tarief. De gateway rekent
+   * audio apart aan (`pricing.input.audio` in GET /v1/models, publiek), en daar
+   * kosten 2.5-flash en 3-flash-preview allebei $1,00/M. Gemeten 16-09-2026, per
+   * M audio-input:
+   *     gemini-3.1-flash-lite   $0,50  (uit $1,50)   <- deze
+   *     gemini-2.5-flash-lite   $0,30  (uit $0,40)   deprecated
+   *     gemini-2.5-flash        $1,00  (uit $2,50)   deprecated
+   *     gemini-3-flash-preview  $1,00  (uit $3,00)
+   * ⛔ 2.5-flash-lite is goedkoper maar verloopt op 31-03-2027, en een verlopen
+   * model is geen besparing. 3.1-flash-lite is het enige goedkopere dat blijft.
    *
-   * ⛔ Reken niet op het model om te weigeren. Een transcriptiemodel dat twijfelt
-   * vult plausibel aan; de aanroeper hoort te toetsen of de hoeveelheid tekst bij
-   * de duur van de opname past.
+   * ☠️ RECHTVAARDIG DIT MODEL NIET OP KWALITEIT. Bij een test met zeven ingesproken
+   * zinnen (16-09-2026) maakten beide toen geteste modellen een fout: 2.5-flash
+   * miste een "twee" en gaf "Mmm." op gemompel, 3-flash-preview verzon op drie
+   * seconden STILTE een volledig cannelloni-recept van ruim 1500 kcal. Dit model
+   * is op die zinnen NIET getoetst.
+   *
+   * ⛔ Reken dus niet op het model om te weigeren. Een transcriptiemodel dat
+   * twijfelt vult plausibel aan; de AANROEPER hoort te toetsen of de hoeveelheid
+   * tekst bij de duur van de opname past. Dat vangnet is hier meer waard dan de
+   * modelkeuze zelf, want het werkt ongeacht wat hier staat.
    */
-  lovableAudio: "google/gemini-2.5-flash",
+  lovableAudio: "google/gemini-3.1-flash-lite",
 } as const;
 
 /** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
