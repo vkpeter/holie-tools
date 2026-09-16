@@ -10,6 +10,7 @@ import {
   genereerBeeld,
   heeftBeeldInSysteem,
   STANDAARD_MODELLEN,
+  taalnaam,
   transcribeerAudio,
 } from "./ai.ts";
 
@@ -446,7 +447,13 @@ Deno.test("stuurt de audio als input_audio in een user-bericht", async () => {
       type: "input_audio",
       input_audio: { data: "AAAA", format: "ogg" },
     });
-    assert(String(delen[1].text).includes("Taalhint: nl."));
+    // De taalhint is op 16-09-2026 van "Taalhint: nl." naar een gewone zin
+    // gegaan: een model volgt een instructie in lopende taal beter dan een label.
+    assert(
+      String(delen[1].text).includes(
+        "De spreker spreekt Vlaams (Belgisch Nederlands).",
+      ),
+    );
   } finally {
     f.herstel();
   }
@@ -770,4 +777,113 @@ Deno.test("de terugval kost evenveel als het eerste model", () => {
     STANDAARD_MODELLEN.lovableBeeld.every((m) => m.startsWith("google/")),
     "geen OpenAI-modellen in de beeldlijst",
   );
+});
+
+Deno.test("domein stuurt de SYSTEEMPROMPT, niet de staart van de opdracht", async () => {
+  // Zonder domeinhint kiest het model bij een kort los woord het akoestisch
+  // dichtstbijzijnde: "draai" in plaats van "druiven" (gemeten 16-09-2026 in
+  // Foodie, door Peter in de app getest). De hint hoort in de systeemrol, want
+  // die stuurt hoe het model LUISTERT; een zin achteraan de opdracht komt te
+  // laat. En hij mag geen vrijbrief worden om iets te verzinnen.
+  const f = metAntwoorden({ content: "druiven" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      domein: "voeding: wat iemand at of dronk",
+      sleutels,
+    });
+    const berichten = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const systeem = String(berichten[0].content);
+    assert(
+      systeem.includes("voeding: wat iemand at of dronk"),
+      "domein niet in de systeemprompt",
+    );
+    assert(
+      systeem.includes("bestaand woord"),
+      "de afweging bij twijfel ontbreekt",
+    );
+    // Het verbod staat ACHTERAAN: dat is de laatste instructie die telt.
+    assert(systeem.includes("vul NOOIT iets aan"), "verzin-verbod ontbreekt");
+    assert(
+      systeem.indexOf("vul NOOIT iets aan") > systeem.indexOf("voeding:"),
+      "het verbod hoort NA het domein te staan",
+    );
+    assert(systeem.includes("luisterkader"), "de nuance ontbreekt");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("de opdracht zegt wat te doen bij half verstaan en bij stilte", async () => {
+  // Concreet in plaats van verbiedend: een model dat alleen hoort wat het NIET
+  // mag, kiest bij twijfel alsnog iets plausibels.
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      taal: "nl",
+      sleutels,
+    });
+    const berichten = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const tekst =
+      (berichten[1].content as Array<{ type: string; text?: string }>)
+        .find((d) => d.type === "text")?.text ?? "";
+    assert(
+      tekst.includes("gok niet naar iets langers"),
+      "half-verstaan-regel ontbreekt",
+    );
+    assert(tekst.includes("NIETS_VERSTAAN"), "stilte-regel ontbreekt");
+    assert(
+      tekst.includes("De spreker spreekt Vlaams (Belgisch Nederlands)."),
+      "taalhint ontbreekt",
+    );
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("zonder domein blijft de standaard-systeemprompt staan", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels,
+    });
+    const berichten = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const systeem = String(berichten[0].content);
+    assert(
+      !systeem.includes("korte gesproken notities over"),
+      "domeinvorm hoort er niet te staan",
+    );
+    assert(
+      systeem.includes("transcriptie-assistent"),
+      "standaardprompt ontbreekt",
+    );
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
+  // Een ISO-code is geen instructie. En bij Nederlands is "Vlaams" preciezer dan
+  // "Nederlands": de sprekers van deze apps zijn Vlaams, wat zowel de woordkeuze
+  // (pistolet, frigo, croque) als de klankherkenning stuurt.
+  assertEquals(taalnaam("nl"), "Vlaams (Belgisch Nederlands)");
+  assertEquals(taalnaam("NL"), "Vlaams (Belgisch Nederlands)");
+  assertEquals(taalnaam("nl-BE"), "Vlaams (Belgisch Nederlands)");
+  assertEquals(taalnaam("fr"), "Frans");
+  // Onbekend gaat ongewijzigd mee: een ruwe hint is beter dan geen.
+  assertEquals(taalnaam("xx"), "xx");
 });

@@ -105,6 +105,41 @@ gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
 ⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
 leest nu een array. Neem `[0]` voor het voorkeursmodel.
 
+## Nieuw in 0.6.0 (ai): domeinhint en taalnamen voor transcriptie
+
+`transcribeerAudio` kent twee nieuwe sturingen, allebei om de **akoestische**
+keuze te verbeteren bij korte, losse woorden.
+
+```ts
+await transcribeerAudio({
+  label: "transcribe-and-analyze",
+  base64,
+  formaat: "wav",
+  taal: "nl", // -> "Vlaams (Belgisch Nederlands)"
+  domein: "voeding: wat iemand at of dronk", // -> in de systeemprompt
+});
+```
+
+- **`domein`** belandt in de **systeemprompt**, niet achteraan de opdracht: de
+  systeemrol stuurt hoe het model luistert, en een hint aan het eind komt te
+  laat om de klankkeuze te halen. Gemeten 16-09-2026 in Foodie: zonder domein
+  werd "druiven" begrepen als "draai".
+- **`taal`** wordt een taalnaam in plaats van een ISO-code. `nl` geeft **Vlaams
+  (Belgisch Nederlands)**, wat zowel de woordkeuze (pistolet, frigo, croque) als
+  de klankherkenning stuurt. Een onbekende code gaat ongewijzigd mee. De tabel
+  staat in `TAALNAMEN`, de omzetting is exporteerbaar als `taalnaam()`.
+
+⚠️ **Een domeinhint is geen vrijbrief om te verzinnen.** Het verbod staat
+achteraan in de systeemprompt, als laatste instructie, en benoemt de valkuil
+letterlijk: het domein is een luisterkader. De poort die het transcript
+beoordeelt blijft dus even nodig, want een model dat twijfelt vult plausibel aan
+en een domeinhint maakt dat aanvullen juist geloofwaardiger.
+
+⚠️ De opdracht is ook concreter geworden: niet "verzin niets" maar wat het model
+WEL moet doen bij een half verstaan woord (geven wat je hoorde, niet gokken naar
+iets langers) en bij stilte (exact `NIETS_VERSTAAN`). Een model dat alleen hoort
+wat het niet mag, kiest bij twijfel alsnog iets plausibels.
+
 ## Nieuw in 0.5.0 (ai): beeldgeneratie
 
 `genereerBeeld(opties)` maakt een beeld en geeft de bytes terug. Net als

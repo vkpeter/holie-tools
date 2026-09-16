@@ -541,6 +541,24 @@ export interface AudioOpties {
   opdracht?: string;
   /** Tweeletterige taalhint, bv. "nl". */
   taal?: string;
+  /**
+   * Waar de opname over gaat, bv. "voeding: wat iemand at of dronk".
+   *
+   * Stuurt de AKOESTISCHE keuze bij een kort of los woord, waar het model
+   * anders het dichtstbijzijnde alledaagse woord pakt. Gemeten 16-09-2026 in
+   * Foodie: "druiven" werd "draai".
+   *
+   * Het domein belandt in de SYSTEEMPROMPT (`audioSysteem`), niet achteraan de
+   * opdracht: de systeemrol stuurt hoe het model luistert, en een hint aan het
+   * eind komt te laat om de akoestische keuze te halen.
+   *
+   * Dit maakt de poort die het transcript beoordeelt NIET overbodig. De hint
+   * zegt waar het over gaat, niet dat er iets moet zijn: een model dat twijfelt
+   * vult plausibel aan, en een domeinhint maakt dat aanvullen juist
+   * geloofwaardiger. Daarom staat het verbod achteraan in de systeemprompt, als
+   * laatste instructie, en toetst de aanroeper het resultaat alsnog.
+   */
+  domein?: string;
   maxTokens?: number;
   temperature?: number;
   /** Providers in volgorde. Standaard `AUDIO_PROVIDERS`. */
@@ -565,9 +583,58 @@ export interface AudioAntwoord {
   usage?: AiVerbruik;
 }
 
+/**
+ * Taalcode naar een naam die een model echt als instructie leest.
+ *
+ * ⚠️ "De spreker spreekt nl." is een ISO-code, geen zin. Een taalnaam stuurt
+ * beter, en bij Nederlands is **Vlaams** preciezer dan "Nederlands": de sprekers
+ * van deze apps zijn Vlaams, en dat stuurt zowel de woordkeuze (pistolet, frigo,
+ * croque, choco) als de klankherkenning. Een onbekende code gaat ongewijzigd
+ * mee - beter een ruwe hint dan geen.
+ */
+const TAALNAMEN: Record<string, string> = {
+  nl: "Vlaams (Belgisch Nederlands)",
+  en: "Engels",
+  fr: "Frans",
+  de: "Duits",
+  es: "Spaans",
+  it: "Italiaans",
+  pt: "Portugees",
+  pl: "Pools",
+  tr: "Turks",
+  ar: "Arabisch",
+};
+
+/** Geeft de taalnaam voor een code, of de code zelf als die onbekend is. */
+export function taalnaam(code: string): string {
+  return TAALNAMEN[code.slice(0, 2).toLowerCase()] ?? code;
+}
+
 const AUDIO_SYSTEEM =
   "Je bent een transcriptie-assistent. Geef ALLEEN de exacte transcriptie terug. " +
   "Corrigeer geen woorden, vervang niets semantisch en vul niets aan wat je niet gehoord hebt.";
+
+/**
+ * Systeemprompt wanneer de aanroeper een domein meegeeft.
+ *
+ * ⚠️ Het domein staat in de SYSTEEMROL en niet enkel in de opdracht: de
+ * systeemrol stuurt hoe het model luistert, de opdracht zegt wat het oplevert.
+ * Een hint achteraan de opdracht komt te laat om de akoestische keuze te halen.
+ *
+ * De volgorde binnen deze tekst is bewust: eerst WAT het model is, dan het
+ * domein als luisterkader, en pas daarna het verbod. Het verbod staat achteraan
+ * omdat het de laatste instructie is die telt bij een twijfelgeval.
+ */
+function audioSysteem(domein: string): string {
+  return "Je bent een transcriptie-assistent voor korte gesproken notities over " +
+    `${domein}. ` +
+    "Klinkt een woord als twee mogelijkheden, kies dan de mogelijkheid die in " +
+    "deze context een bestaand woord is; bij gelijke waarschijnlijkheid kies je " +
+    "wat je letterlijk hoorde. " +
+    "Geef ALLEEN de transcriptie terug. Corrigeer geen woorden, vervang niets " +
+    "semantisch en vul NOOIT iets aan wat je niet gehoord hebt: het domein is " +
+    "een luisterkader, geen reden om er iets bij te bedenken.";
+}
 
 /**
  * Zet spraak om naar tekst.
@@ -604,9 +671,23 @@ export async function transcribeerAudio(
       ? [opties.model]
       : [...STANDAARD_MODELLEN.lovableAudio]).filter(Boolean);
   const pogingen = Math.max(1, opties.pogingen ?? 1);
-  const taalhint = opties.taal ? ` Taalhint: ${opties.taal}.` : "";
+  const taalhint = opties.taal
+    ? ` De spreker spreekt ${taalnaam(opties.taal)}.`
+    : "";
+  // Het domein zit in de SYSTEEMPROMPT (zie `audioSysteem`), niet hier: een hint
+  // achteraan de opdracht komt te laat om de akoestische keuze te sturen.
+  //
+  // Deze opdracht zegt wat het model moet OPLEVEREN. Twee dingen zijn bewust
+  // concreet in plaats van verbiedend geformuleerd: wat te doen bij een half
+  // verstaan woord (liever weglaten dan gokken) en wat te doen bij stilte
+  // (exact NIETS_VERSTAAN). Een model dat alleen hoort wat het NIET mag doen,
+  // kiest bij twijfel alsnog iets plausibels.
   const opdracht = opties.opdracht ??
-    `Transcribeer dit audiobericht letterlijk. Behoud komma's en opsommingen exact zoals uitgesproken. Hoor je geen verstaanbare spraak, antwoord dan exact met NIETS_VERSTAAN en verzin niets.${taalhint}`;
+    "Transcribeer dit audiobericht woord voor woord." +
+      " Behoud komma's en opsommingen exact zoals uitgesproken." +
+      taalhint +
+      " Versta je een woord maar half, geef dan wat je hoorde en gok niet naar iets langers." +
+      " Hoor je helemaal geen verstaanbare spraak, antwoord dan met exact dit woord: NIETS_VERSTAAN.";
 
   const beschikbaar: string[] = [];
   let laatsteFout = "";
@@ -632,7 +713,13 @@ export async function transcribeerAudio(
             body: JSON.stringify({
               model,
               messages: [
-                { role: "system", content: opties.systeem ?? AUDIO_SYSTEEM },
+                {
+                  role: "system",
+                  content: opties.systeem ??
+                    (opties.domein
+                      ? audioSysteem(opties.domein)
+                      : AUDIO_SYSTEEM),
+                },
                 {
                   role: "user",
                   content: [
