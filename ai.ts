@@ -20,7 +20,24 @@ export const STANDAARD_MODELLEN = {
   lovable: "google/gemini-3-flash-preview",
   deepseek: "deepseek-v4-flash",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
+  /**
+   * Spraak naar tekst. Enkel Lovable: DeepSeek verwerkt geen audio, dus hier
+   * bestaat geen providerkeuze - zie `transcribeerAudio`.
+   */
+  lovableAudio: "google/gemini-3-flash-preview",
 } as const;
+
+/** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
+export const AUDIO_FORMATEN = [
+  "wav",
+  "mp3",
+  "ogg",
+  "flac",
+  "aac",
+  "aiff",
+] as const;
+
+export type AudioFormaat = typeof AUDIO_FORMATEN[number];
 
 const ENDPOINT: Record<AiProvider, string> = {
   lovable: "https://ai.gateway.lovable.dev/v1/chat/completions",
@@ -429,6 +446,182 @@ export async function callAi(
 
   throw new AiOnbeschikbaar(
     `No AI provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
+      laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
+    })`,
+    laatsteStatus,
+  );
+}
+
+/**
+ * Providers die spraak naar tekst kunnen. Vandaag enkel Lovable, maar dit staat
+ * als lijst zodat een tweede provider erbij kan zonder dat een aanroeper wijzigt.
+ */
+export const AUDIO_PROVIDERS: AiProvider[] = ["lovable"];
+
+export interface AudioOpties {
+  /** Naam in de logregels, bv. "transcribe-and-analyze". */
+  label: string;
+  /** De audio als base64, zonder `data:`-voorvoegsel. */
+  base64: string;
+  /** Formaat van de audio. Moet in `AUDIO_FORMATEN` zitten. */
+  formaat: AudioFormaat;
+  /** Instructie voor het model. Zonder opgave een letterlijke transcriptie. */
+  systeem?: string;
+  /** Vraag bij de audio. Zonder opgave een neutrale transcriptie-opdracht. */
+  opdracht?: string;
+  /** Tweeletterige taalhint, bv. "nl". */
+  taal?: string;
+  maxTokens?: number;
+  temperature?: number;
+  /** Providers in volgorde. Standaard `AUDIO_PROVIDERS`. */
+  volgorde?: AiProvider[];
+  /** Model bij Lovable. Standaard `STANDAARD_MODELLEN.lovableAudio`. */
+  model?: string;
+  /** Pogingen per provider, standaard 1. */
+  pogingen?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  sleutels?: Partial<Record<AiProvider, string>>;
+  bijSucces?: (poging: AiPoging) => void | Promise<void>;
+}
+
+export interface AudioAntwoord {
+  tekst: string;
+  provider: AiProvider;
+  model: string;
+  usage?: AiVerbruik;
+}
+
+const AUDIO_SYSTEEM =
+  "Je bent een transcriptie-assistent. Geef ALLEEN de exacte transcriptie terug. " +
+  "Corrigeer geen woorden, vervang niets semantisch en vul niets aan wat je niet gehoord hebt.";
+
+/**
+ * Zet spraak om naar tekst.
+ *
+ * ⛔ Dit loopt NIET via `callAi`: die keten spreekt providers aan die audio niet
+ * kennen, en DeepSeek is er daar één van. Zolang `AUDIO_PROVIDERS` enkel Lovable
+ * bevat, is dit de plek waar de app haar Gemini-verbruik voor spraak centraal
+ * beheert - niet elke aanroeper apart.
+ *
+ * ⚠️ Het model aanvaardt enkel de formaten uit `AUDIO_FORMATEN`. Geef je iets
+ * anders (`webm`, `mp4`), dan weigert de gateway dat niet netjes maar VERZINT ze
+ * een plausibele transcriptie. Daarom weigert deze functie zo'n formaat zelf, met
+ * een `TypeError`, in plaats van het door te laten: een stil verzonnen antwoord is
+ * erger dan een harde fout. Herverpak in de browser naar 16 kHz mono WAV.
+ */
+export async function transcribeerAudio(
+  opties: AudioOpties,
+): Promise<AudioAntwoord> {
+  if (!AUDIO_FORMATEN.includes(opties.formaat)) {
+    throw new TypeError(
+      `Audioformaat "${opties.formaat}" wordt niet ondersteund (wel: ${
+        AUDIO_FORMATEN.join(", ")
+      })`,
+    );
+  }
+
+  const volgorde = opties.volgorde ?? AUDIO_PROVIDERS;
+  const model = opties.model ?? STANDAARD_MODELLEN.lovableAudio;
+  const pogingen = Math.max(1, opties.pogingen ?? 1);
+  const taalhint = opties.taal ? ` Taalhint: ${opties.taal}.` : "";
+  const opdracht = opties.opdracht ??
+    `Transcribeer dit audiobericht letterlijk. Behoud komma's en opsommingen exact zoals uitgesproken. Hoor je geen verstaanbare spraak, antwoord dan exact met NIETS_VERSTAAN en verzin niets.${taalhint}`;
+
+  const beschikbaar: string[] = [];
+  let laatsteFout = "";
+  let laatsteStatus = 0;
+
+  for (const provider of volgorde) {
+    const sleutel = leesSleutel(provider, opties as unknown as AiOpties);
+    if (!sleutel) continue;
+    beschikbaar.push(provider);
+
+    for (let poging = 1; poging <= pogingen; poging++) {
+      const start = Date.now();
+      let status = 0;
+      try {
+        const resp = await fetch(ENDPOINT[provider], {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sleutel}`,
+            "Content-Type": "application/json",
+          },
+          signal: combineerSignalen(opties.timeoutMs, opties.signal),
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: opties.systeem ?? AUDIO_SYSTEEM },
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_audio",
+                    input_audio: {
+                      data: opties.base64,
+                      format: opties.formaat,
+                    },
+                  },
+                  { type: "text", text: opdracht },
+                ],
+              },
+            ],
+            max_tokens: opties.maxTokens ?? 500,
+            temperature: opties.temperature ?? 0.1,
+          }),
+        });
+        status = resp.status;
+        const data = await resp.json().catch(() => ({}));
+        const tekst = data?.choices?.[0]?.message?.content ?? "";
+        const duurMs = Date.now() - start;
+
+        if (!resp.ok || !tekst) {
+          laatsteStatus = status;
+          laatsteFout = `${provider} gaf ${status}${
+            tekst ? "" : " (lege inhoud)"
+          }`;
+          console.warn(`[audio:${opties.label}] ${laatsteFout}`);
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs,
+            status,
+            fout: laatsteFout,
+          });
+          if (status === 429 || status >= 500 || !tekst) continue;
+          break;
+        }
+
+        await roep(opties.bijSucces, {
+          label: opties.label,
+          provider,
+          model,
+          duurMs,
+          status,
+          usage: data?.usage,
+          lengte: tekst.length,
+        });
+        return { tekst, provider, model, usage: data?.usage };
+      } catch (e) {
+        laatsteFout = `${provider}: ${foutTekst(e)}`;
+        console.warn(`[audio:${opties.label}] ${laatsteFout}`);
+        await roep(opties.bijSucces, {
+          label: opties.label,
+          provider,
+          model,
+          duurMs: Date.now() - start,
+          status,
+          fout: laatsteFout,
+        });
+      }
+      if (opties.signal?.aborted) break;
+    }
+    if (opties.signal?.aborted) break;
+  }
+
+  throw new AiOnbeschikbaar(
+    `No audio provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
       laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
     })`,
     laatsteStatus,

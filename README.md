@@ -78,6 +78,42 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
 
+## Nieuw in 0.3.0 (ai): spraak naar tekst
+
+`transcribeerAudio(opties)` zet spraak om naar tekst. Het staat naast `callAi`,
+niet erin: die keten spreekt providers aan die audio niet kennen, en DeepSeek is
+er daar een van.
+
+```ts
+import { transcribeerAudio } from "jsr:@holie/tools@^0.3/ai";
+
+const { tekst, provider } = await transcribeerAudio({
+  label: "transcribe-and-analyze",
+  base64: audioBase64, // zonder `data:`-voorvoegsel
+  formaat: "wav", // uit AUDIO_FORMATEN
+  taal: "nl",
+});
+```
+
+- **De providerkeuze staat op een plek**: `AUDIO_PROVIDERS` (vandaag enkel
+  `["lovable"]`) en `STANDAARD_MODELLEN.lovableAudio`. Wie het model of de
+  provider voor alle spraak wil wijzigen, wijzigt die twee, niet elke aanroeper.
+  De lijst is met opzet een array, zodat een tweede audioprovider erbij kan
+  zonder dat een aanroeper verandert.
+- **Een formaat dat het model niet kan lezen loopt hier stuk**, met een
+  `TypeError`, voor er een verzoek uitgaat. ⚠️ Dat is geen vormelijkheid: de
+  gateway weigert `webm` of `mp4` **niet** netjes, ze verzint dan een plausibel
+  klinkende transcriptie. Een verzonnen boodschappenlijstje dat als echt
+  doorgaat is erger dan een harde fout. Aanvaard worden `wav`, `mp3`, `ogg`,
+  `flac`, `aac` en `aiff` (`AUDIO_FORMATEN`); herverpak in de browser naar 16
+  kHz mono WAV.
+- **Zonder `systeem` en `opdracht`** vraagt het om een letterlijke transcriptie
+  die niets aanvult wat er niet gezegd is, met `NIETS_VERSTAAN` als er geen
+  verstaanbare spraak is.
+- Verder dezelfde vorm als `callAi`: `pogingen`, `timeoutMs`, `signal`,
+  `sleutels`, `bijSucces`, en een `AiOnbeschikbaar` met de beschikbare sleutels
+  en de laatste fout als alles faalt.
+
 ## Nieuw in 0.2.0 (ai)
 
 - **`maxTokens` en `temperature` gaan enkel mee als je ze opgeeft.** Tot 0.1.1

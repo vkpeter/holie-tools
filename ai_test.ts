@@ -7,6 +7,8 @@ import {
   callAi,
   foutTekst,
   heeftBeeldInSysteem,
+  STANDAARD_MODELLEN,
+  transcribeerAudio,
 } from "./ai.ts";
 
 type Antwoord = {
@@ -394,6 +396,117 @@ Deno.test("een hook die een niet-Error gooit, breekt niets", async () => {
       },
     });
     assertEquals(r.content, "ok");
+  } finally {
+    f.herstel();
+  }
+});
+
+// --- transcribeerAudio -------------------------------------------------------
+// Spraak naar tekst kan alleen naar Lovable: DeepSeek verwerkt geen audio. Deze
+// tests leggen vast dat de providerkeuze op EEN plek staat en dat een formaat dat
+// het model niet kan lezen hier stukloopt, niet stilletjes verzonnen wordt.
+
+Deno.test("transcribeert via Lovable met het audiomodel", async () => {
+  const f = metAntwoorden({ content: "twee sneden brood" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels,
+    });
+    assertEquals(r.tekst, "twee sneden brood");
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.model, STANDAARD_MODELLEN.lovableAudio);
+    assert(f.aanroepen[0].url.includes("ai.gateway.lovable.dev"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("stuurt de audio als input_audio in een user-bericht", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "ogg",
+      taal: "nl",
+      sleutels,
+    });
+    const msgs = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    assertEquals(msgs[0].role, "system");
+    assertEquals(msgs[1].role, "user");
+    const delen = msgs[1].content as Array<Record<string, unknown>>;
+    assertEquals(delen[0], {
+      type: "input_audio",
+      input_audio: { data: "AAAA", format: "ogg" },
+    });
+    assert(String(delen[1].text).includes("Taalhint: nl."));
+  } finally {
+    f.herstel();
+  }
+});
+
+// ⚠️ Dit is de belangrijkste test van de drie. De gateway WEIGERT een formaat als
+// webm of mp4 niet netjes: ze verzint dan een plausibel klinkende transcriptie.
+// Een verzonnen boodschappenlijstje dat als echt doorgaat is erger dan een fout,
+// dus de weigering hoort hier te gebeuren, voor er een verzoek uitgaat.
+Deno.test("weigert een formaat dat het model niet kan lezen", async () => {
+  const f = metAntwoorden({ content: "verzonnen lijstje" });
+  try {
+    await assertRejects(
+      () =>
+        transcribeerAudio({
+          label: "t",
+          base64: "AAAA",
+          formaat: "webm" as never,
+          sleutels,
+        }),
+      TypeError,
+    );
+    assertEquals(f.aanroepen.length, 0);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("meldt AiOnbeschikbaar als de gateway blijft falen", async () => {
+  const f = metAntwoorden({ status: 500 });
+  try {
+    await assertRejects(
+      () =>
+        transcribeerAudio({
+          label: "t",
+          base64: "AAAA",
+          formaat: "wav",
+          sleutels,
+        }),
+      AiOnbeschikbaar,
+      "No audio provider available",
+    );
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("slaat een provider zonder sleutel over", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await assertRejects(
+      () =>
+        transcribeerAudio({
+          label: "t",
+          base64: "AAAA",
+          formaat: "wav",
+          sleutels: {},
+        }),
+      AiOnbeschikbaar,
+      "sleutels: geen",
+    );
+    assertEquals(f.aanroepen.length, 0);
   } finally {
     f.herstel();
   }
