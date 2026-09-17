@@ -3,6 +3,7 @@ import {
   AiOnbeschikbaar,
   type AiPoging,
   AiQuotumFout,
+  AUDIO_FORMATEN,
   BeeldGeweigerd,
   bouwDeepseekBody,
   callAi,
@@ -12,6 +13,7 @@ import {
   STANDAARD_MODELLEN,
   taalnaam,
   transcribeerAudio,
+  VIDEO_FORMATEN,
 } from "./ai.ts";
 
 type Antwoord = {
@@ -463,6 +465,9 @@ Deno.test("stuurt de audio als input_audio in een user-bericht", async () => {
 // webm of mp4 niet netjes: ze verzint dan een plausibel klinkende transcriptie.
 // Een verzonnen boodschappenlijstje dat als echt doorgaat is erger dan een fout,
 // dus de weigering hoort hier te gebeuren, voor er een verzoek uitgaat.
+// ⚠️ 17-09-2026: video werd toegevoegd (mp4, mov), maar webm NIET - juist omdat
+// deze test bestaat. De meting hieronder ging over webm als `input_audio`; of webm
+// als video-deel wel deugt is nooit gemeten, dus blijft het geweigerd.
 Deno.test("weigert een formaat dat het model niet kan lezen", async () => {
   const f = metAntwoorden({ content: "verzonnen lijstje" });
   try {
@@ -886,4 +891,104 @@ Deno.test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
   assertEquals(taalnaam("fr"), "Frans");
   // Onbekend gaat ongewijzigd mee: een ruwe hint is beter dan geen.
   assertEquals(taalnaam("xx"), "xx");
+});
+
+// --- video in transcribeerAudio ----------------------------------------------
+// Toegevoegd 17-09-2026. Een mp4 mag NIET als `input_audio` vertrekken: de gateway
+// verwacht daar een apart video-deel. Billara deed dit tot vandaag met een eigen
+// fetch omdat dit pakket het niet kon.
+
+Deno.test("stuurt video als een video-deel, niet als input_audio", async () => {
+  const f = metAntwoorden({ content: "hallo uit de video" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "BBBB",
+      formaat: "mp4",
+      sleutels,
+    });
+    assertEquals(r.tekst, "hallo uit de video");
+    const msgs = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const delen = msgs[1].content as Array<Record<string, unknown>>;
+    assertEquals(delen[0].type, "video");
+    assertEquals(
+      (delen[0].video as Record<string, unknown>).format,
+      "mp4",
+    );
+    assertEquals(
+      (delen[0].video as Record<string, unknown>).data,
+      "BBBB",
+    );
+    // De tegentoets: er mag NERGENS een input_audio-deel in zitten.
+    assert(!delen.some((d) => d.type === "input_audio"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("audio blijft input_audio, ook nu video bestaat", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "mp3",
+      sleutels,
+    });
+    const msgs = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const delen = msgs[1].content as Array<Record<string, unknown>>;
+    assertEquals(delen[0].type, "input_audio");
+    assert(!delen.some((d) => d.type === "video"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("de standaardopdracht zegt videobericht bij video", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "BBBB",
+      formaat: "mov",
+      sleutels,
+    });
+    const msgs = f.aanroepen[0].body.messages as Array<
+      { role: string; content: unknown }
+    >;
+    const delen = msgs[1].content as Array<Record<string, unknown>>;
+    const tekst = String(delen[delen.length - 1].text);
+    assert(tekst.includes("videobericht"), tekst);
+    assert(!tekst.includes("audiobericht"), tekst);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("een onbekend formaat noemt beide lijsten", async () => {
+  await assertRejects(
+    () =>
+      transcribeerAudio({
+        label: "t",
+        base64: "AAAA",
+        // deno-lint-ignore no-explicit-any
+        formaat: "avi" as any,
+        sleutels,
+      }),
+    TypeError,
+    "video:",
+  );
+});
+
+Deno.test("VIDEO_FORMATEN en AUDIO_FORMATEN overlappen niet", () => {
+  for (const v of VIDEO_FORMATEN) {
+    assert(
+      !(AUDIO_FORMATEN as readonly string[]).includes(v),
+      `${v} staat in beide lijsten, dan is de keuze tussen video en input_audio willekeurig`,
+    );
+  }
 });

@@ -109,6 +109,40 @@ export const AUDIO_FORMATEN = [
 
 export type AudioFormaat = typeof AUDIO_FORMATEN[number];
 
+/**
+ * Videoformaten die als VIDEO-deel meegaan in plaats van als `input_audio`.
+ *
+ * ⚠️ Dit is een ander bericht-onderdeel, geen ander formaat van hetzelfde: de
+ * gateway verwacht `{ type: "video", video: { data, format } }` waar audio
+ * `{ type: "input_audio", input_audio: { data, format } }` krijgt. Wie een mp4
+ * als `input_audio` aanbiedt, krijgt een weigering of een leeg antwoord terug.
+ *
+ * Toegevoegd 17-09-2026 voor Billara: doorgestuurde video's in Telegram werden
+ * daar met een eigen fetch getranscribeerd, omdat dit pakket ze niet aankon.
+ *
+ * ☠️ `webm` staat er BEWUST NIET in. De test "weigert een formaat dat het model
+ * niet kan lezen" legt een eerdere meting vast: de gateway weigert webm niet
+ * netjes maar verzint een plausibel klinkende transcriptie, en een verzonnen
+ * transcript dat als echt doorgaat is erger dan een fout. Die meting ging over
+ * webm als `input_audio`; of het als video-deel wel klopt is NIET gemeten. Tot
+ * iemand dat meet blijft webm geweigerd. Zet het er niet bij "omdat het logisch
+ * lijkt".
+ */
+export const VIDEO_FORMATEN = [
+  "mp4",
+  "mov",
+] as const;
+
+export type VideoFormaat = typeof VIDEO_FORMATEN[number];
+
+/** Alles wat `transcribeerAudio` aankan: audio of video. */
+export type MediaFormaat = AudioFormaat | VideoFormaat;
+
+/** Hoort dit formaat bij de videokant? */
+export function isVideoFormaat(formaat: string): formaat is VideoFormaat {
+  return (VIDEO_FORMATEN as readonly string[]).includes(formaat);
+}
+
 const ENDPOINT: Record<AiProvider, string> = {
   lovable: "https://ai.gateway.lovable.dev/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
@@ -533,8 +567,11 @@ export interface AudioOpties {
   label: string;
   /** De audio als base64, zonder `data:`-voorvoegsel. */
   base64: string;
-  /** Formaat van de audio. Moet in `AUDIO_FORMATEN` zitten. */
-  formaat: AudioFormaat;
+  /**
+   * Formaat van de opname. Moet in `AUDIO_FORMATEN` of `VIDEO_FORMATEN` zitten.
+   * Een videoformaat gaat als video-deel mee, audio als `input_audio`.
+   */
+  formaat: MediaFormaat;
   /** Instructie voor het model. Zonder opgave een letterlijke transcriptie. */
   systeem?: string;
   /** Vraag bij de audio. Zonder opgave een neutrale transcriptie-opdracht. */
@@ -653,11 +690,15 @@ function audioSysteem(domein: string): string {
 export async function transcribeerAudio(
   opties: AudioOpties,
 ): Promise<AudioAntwoord> {
-  if (!AUDIO_FORMATEN.includes(opties.formaat)) {
+  const video = isVideoFormaat(opties.formaat);
+  if (
+    !video &&
+    !(AUDIO_FORMATEN as readonly string[]).includes(opties.formaat)
+  ) {
     throw new TypeError(
-      `Audioformaat "${opties.formaat}" wordt niet ondersteund (wel: ${
+      `Formaat "${opties.formaat}" wordt niet ondersteund (audio: ${
         AUDIO_FORMATEN.join(", ")
-      })`,
+      }; video: ${VIDEO_FORMATEN.join(", ")})`,
     );
   }
 
@@ -683,7 +724,9 @@ export async function transcribeerAudio(
   // (exact NIETS_VERSTAAN). Een model dat alleen hoort wat het NIET mag doen,
   // kiest bij twijfel alsnog iets plausibels.
   const opdracht = opties.opdracht ??
-    "Transcribeer dit audiobericht woord voor woord." +
+    `Transcribeer dit ${
+        video ? "videobericht" : "audiobericht"
+      } woord voor woord.` +
       " Behoud komma's en opsommingen exact zoals uitgesproken." +
       taalhint +
       " Versta je een woord maar half, geef dan wat je hoorde en gok niet naar iets langers." +
@@ -723,13 +766,21 @@ export async function transcribeerAudio(
                 {
                   role: "user",
                   content: [
-                    {
-                      type: "input_audio",
-                      input_audio: {
-                        data: opties.base64,
-                        format: opties.formaat,
+                    video
+                      ? {
+                        type: "video",
+                        video: {
+                          data: opties.base64,
+                          format: opties.formaat,
+                        },
+                      }
+                      : {
+                        type: "input_audio",
+                        input_audio: {
+                          data: opties.base64,
+                          format: opties.formaat,
+                        },
                       },
-                    },
                     { type: "text", text: opdracht },
                   ],
                 },
