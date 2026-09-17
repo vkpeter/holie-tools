@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertAlmostEquals,
+  assertEquals,
+  assertRejects,
+} from "@std/assert";
 import {
   AiOnbeschikbaar,
   type AiPoging,
@@ -10,8 +15,11 @@ import {
   foutTekst,
   genereerBeeld,
   heeftBeeldInSysteem,
+  leesJson,
+  schatUsd,
   STANDAARD_MODELLEN,
   taalnaam,
+  TARIEVEN,
   transcribeerAudio,
   VIDEO_FORMATEN,
 } from "./ai.ts";
@@ -990,5 +998,124 @@ Deno.test("VIDEO_FORMATEN en AUDIO_FORMATEN overlappen niet", () => {
       !(AUDIO_FORMATEN as readonly string[]).includes(v),
       `${v} staat in beide lijsten, dan is de keuze tussen video en input_audio willekeurig`,
     );
+  }
+});
+
+Deno.test("leesJson: kaal antwoord, het gewone geval", () => {
+  assertEquals(leesJson('{"a":1}'), { a: 1 });
+  assertEquals(leesJson('  {"a":1}\n'), { a: 1 });
+});
+
+Deno.test("leesJson: uit een codeblok, met en zonder taalaanduiding", () => {
+  assertEquals(leesJson('```json\n{"a":1}\n```'), { a: 1 });
+  assertEquals(leesJson('```\n{"a":1}\n```'), { a: 1 });
+});
+
+Deno.test(
+  "leesJson: KEUZE - een fence MIDDENIN de tekst telt ook mee",
+  () => {
+    // Dit is het gedragsverschil tussen de twee implementaties die dit pakket
+    // vervangt: Billara's `parseAIJson` zocht de eerste fence overal, de
+    // podcast-variant streepte alleen fences aan begin en eind weg. Hier staat
+    // de eerste variant, en deze test legt dat vast.
+    const ruw = 'Hier is het antwoord:\n\n```json\n{"a":1}\n```\n\n' +
+      "Laat me weten of dit klopt {of niet}.";
+    assertEquals(leesJson(ruw), { a: 1 });
+  },
+);
+
+Deno.test("leesJson: JSON met tekst eromheen, zonder fence", () => {
+  assertEquals(leesJson('Zeker! {"a":1} Groeten.'), { a: 1 });
+});
+
+Deno.test("leesJson: lege string en tekst zonder JSON geven null", () => {
+  assertEquals(leesJson(""), null);
+  assertEquals(leesJson("   \n  "), null);
+  assertEquals(leesJson("Sorry, dat kan ik niet."), null);
+  assertEquals(leesJson("{ dit is geen json }"), null);
+});
+
+Deno.test("leesJson: een niet-afgesloten fence valt terug op de tekststap", () => {
+  assertEquals(leesJson('```json\n{"a":1}'), { a: 1 });
+});
+
+Deno.test("leesJson: een fence zonder geldige JSON valt terug op de tekststap", () => {
+  // De stappen zijn een keten, geen keuze: mist de fence, dan mag stap (c) nog.
+  const ruw = 'Voorbeeld:\n```sql\nSELECT 1;\n```\nAntwoord: {"a":1}';
+  assertEquals(leesJson(ruw), { a: 1 });
+});
+
+Deno.test("leesJson: vorm array zoekt vierkante haken", () => {
+  assertEquals(leesJson("Hier komt ie: [1,2] klaar.", { vorm: "array" }), [
+    1,
+    2,
+  ]);
+  // Zonder `vorm` zoekt stap (c) accolades, dus deze array blijft onvindbaar.
+  assertEquals(leesJson("Hier komt ie: [1,2] klaar."), null);
+});
+
+Deno.test("leesJson: een kale array komt terug, ook als je een object vroeg", () => {
+  // Bewust: stap (a) is een kale JSON.parse en doet GEEN vormcontrole. `vorm`
+  // stuurt alleen welke haken stap (c) zoekt. Schemavalidatie blijft bij de
+  // aanroeper, dus een array die geldige JSON is komt gewoon terug.
+  assertEquals(leesJson("[1,2]"), [1, 2]);
+});
+
+Deno.test("leesJson: fence-inhoud hoeft geen object of array te zijn", () => {
+  // De strip-variant kon dit niet: die zoekt haken en vindt er geen.
+  assertEquals(leesJson('```json\n"hallo"\n```'), "hallo");
+  assertEquals(leesJson("```\n42\n```"), 42);
+});
+
+Deno.test("schatUsd: bekend tekstmodel, met de hand nagerekend", () => {
+  // 1000 x $0,0000005 = $0,0005 input, 500 x $0,000003 = $0,0015 output.
+  const r = schatUsd("google/gemini-3-flash-preview", {
+    prompt_tokens: 1000,
+    completion_tokens: 500,
+  });
+  assertEquals(r.usd, 0.002);
+  assertEquals(r.input, 1000);
+  assertEquals(r.output, 500);
+  assertEquals(r.geschat, false);
+});
+
+Deno.test("schatUsd: DeepSeek rekent per token, niet per miljoen", () => {
+  // 1M x $0,27/M = $0,27 en 500k x $1,10/M = $0,55, samen $0,82.
+  const r = schatUsd("deepseek-v4-flash", {
+    prompt_tokens: 1_000_000,
+    completion_tokens: 500_000,
+  });
+  assertAlmostEquals(r.usd, 0.82);
+  assertEquals(r.geschat, false);
+});
+
+Deno.test("schatUsd: onbekend model geeft 0 en geschat", () => {
+  // Bewust: liever een zichtbaar ontbrekend bedrag dan een verzonnen bedrag.
+  const r = schatUsd("google/gemini-3.1-flash-lite-image", {
+    prompt_tokens: 100,
+    completion_tokens: 100,
+  });
+  assertEquals(r, { usd: 0, input: 0, output: 0, geschat: true });
+});
+
+Deno.test("schatUsd: zonder usage is een tekstmodel gewoon 0, niet geschat", () => {
+  const r = schatUsd("google/gemini-2.5-flash");
+  assertEquals(r, { usd: 0, input: 0, output: 0, geschat: false });
+});
+
+Deno.test("schatUsd: zonder usage valt beeld terug op het vaste tokenaantal", () => {
+  // 1290 beeldtokens x $0,00003 = $0,0387.
+  const r = schatUsd("google/gemini-2.5-flash-image");
+  assertEquals(r.output, 1290);
+  assertEquals(r.usd, 0.0387);
+  assertEquals(r.geschat, true);
+});
+
+Deno.test("TARIEVEN staan per token, niet per miljoen", () => {
+  // Een tarief per miljoen zou hier ordes van grootte te hoog uitkomen; deze
+  // grens (1 dollarcent per token) betrapt zo'n eenheidsfout meteen.
+  for (const [model, t] of Object.entries(TARIEVEN)) {
+    assert(t.input < 0.01, `${model} input lijkt per miljoen`);
+    assert(t.output < 0.01, `${model} output lijkt per miljoen`);
   }
 });

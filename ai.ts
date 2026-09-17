@@ -1100,3 +1100,142 @@ export async function genereerBeeld(
     laatsteStatus,
   );
 }
+
+/**
+ * Peutert JSON uit een modelantwoord: kaal, uit een codeblok, of uit de tekst
+ * eromheen. Lukt niets, dan `null`.
+ *
+ * GEEN SCHEMAVALIDATIE. Wat eruit komt is alleen "dit was geldige JSON"; of de
+ * velden kloppen weet enkel de aanroeper, en die controle hoort daar te blijven.
+ * Een halfslachtige validatie hier zou de aanroeper doen denken dat het al
+ * gebeurd is.
+ *
+ * ⚠️ KEUZE BIJ HET CODEBLOK: DE EERSTE FENCE WAAR DAN OOK IN DE TEKST.
+ * Dit pakket vervangt twee implementaties die hierin verschilden. Billara
+ * (`parseAIJson`) zocht de eerste fence overal in de tekst; de podcast-pijplijn
+ * (`leesOordeel`, `leesEtiketten`) streepte alleen een fence aan het BEGIN en
+ * het EIND weg. De eerste variant staat hier, omdat ze strikt meer aankan:
+ *   - Een fence middenin ("Hier is het antwoord: ```json ... ```") vindt ze wél;
+ *     de strip-variant laat de omringende tekst staan en moet het van stap (c)
+ *     hebben, wat misgaat zodra er elders nog een `{` of `}` in de prozatekst
+ *     staat.
+ *   - Inhoud die geen object of array is (een string, een getal) komt er via de
+ *     fence uit; stap (c) zoekt haakjes en vindt die daar niet.
+ * Ze breekt geen geval van de strip-variant: een fence aan begin en eind ís de
+ * eerste fence. Vindt de regex een fence waar geen geldige JSON in staat, dan
+ * valt stap (c) er alsnog op terug - de stappen zijn een keten, geen keuze.
+ */
+export function leesJson<T = unknown>(
+  ruw: string,
+  opties?: { vorm?: "object" | "array" },
+): T | null {
+  const vorm = opties?.vorm ?? "object";
+  const open = vorm === "array" ? "[" : "{";
+  const dicht = vorm === "array" ? "]" : "}";
+  const schoon = ruw.trim();
+  if (!schoon) return null;
+
+  // Een geslaagde parse kan `null` opleveren, en dat is iets anders dan "niet
+  // gelukt". Daarom een vlag in plaats van null als mislukking.
+  const probeer = (tekst: string): { ok: boolean; waarde?: T } => {
+    try {
+      return { ok: true, waarde: JSON.parse(tekst) as T };
+    } catch {
+      return { ok: false };
+    }
+  };
+
+  // (a) Kaal. Het gewone geval: een model met `response_format: json_object`
+  // levert precies dit, en dan is de rest van deze functie dode moeite.
+  const kaal = probeer(schoon);
+  if (kaal.ok) return kaal.waarde ?? null;
+
+  // (b) Uit het eerste codeblok, met of zonder taalaanduiding.
+  const fence = schoon.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    const uitFence = probeer(fence[1].trim());
+    if (uitFence.ok) return uitFence.waarde ?? null;
+  }
+
+  // (c) Van het eerste open haakje tot het laatste sluithaakje. Vangt het
+  // veelvoorkomende "hier is je JSON:"-voorwoord en een niet-afgesloten fence.
+  const start = schoon.indexOf(open);
+  const eind = schoon.lastIndexOf(dicht);
+  if (start >= 0 && eind > start) {
+    const uitTekst = probeer(schoon.slice(start, eind + 1));
+    if (uitTekst.ok) return uitTekst.waarde ?? null;
+  }
+
+  return null;
+}
+
+/**
+ * Tarieven per model, in USD PER TOKEN (niet per miljoen).
+ *
+ * ⚠️ DE EENHEID IS PER TOKEN. De bronnen rekenden verschillend: de podcast-meter
+ * schreef het tarief per token uit, Billara schreef `0.27 / 1_000_000`. Hier
+ * staat overal het bedrag per token, zodat `schatUsd` gewoon kan vermenigvuldigen.
+ *
+ * Deze bedragen zijn AFGELEZEN, niet geschat. Verzin er geen bij: een model dat
+ * hier niet staat hoort 0 op te leveren (zie `schatUsd`), niet een plausibel
+ * cijfer. De Google-tarieven komen van de Stripe-facturen van de Lovable-gateway
+ * (723FYVFL-0003 t/m -0012, stabiel over vijf cycli, afgelezen 10 aug 2026); de
+ * DeepSeek-tarieven zijn de cache-miss-prijs van $0,27 in / $1,10 uit per M.
+ */
+export const TARIEVEN: Record<string, { input: number; output: number }> = {
+  // Beeldmodellen. `output` is hier beelduitvoer, geen tekst: 20x de
+  // tekst-output van gemini-3-flash-preview en 120x de tekst-input.
+  "google/gemini-2.5-flash-image": { input: 0, output: 0.00003 },
+  "google/gemini-3.1-flash-image-preview": { input: 0, output: 0.00006 },
+  // Tekstmodellen op de Lovable-gateway.
+  "google/gemini-2.5-pro": { input: 0.00000125, output: 0.00001 },
+  "google/gemini-3-flash-preview": { input: 0.0000005, output: 0.000003 },
+  "google/gemini-2.5-flash": { input: 0.0000003, output: 0.0000025 },
+  // DeepSeek, cache miss.
+  "deepseek-v4-flash": { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
+};
+
+/**
+ * Het tokenaantal van één beeld ligt vast per model - een kortere prompt maakt
+ * het dus niet goedkoper. Nodig als terugval voor wanneer de gateway geen
+ * `usage` meestuurt: zonder dit zou een beeldcall als gratis geboekt worden,
+ * terwijl beeld juist het duurste deel van de rekening is.
+ */
+const BEELD_TOKENS: Record<string, number> = {
+  "google/gemini-2.5-flash-image": 1290,
+  "google/gemini-3.1-flash-image-preview": 1120,
+};
+
+/**
+ * Rekent tokengebruik om naar dollars.
+ *
+ * ONBEKEND MODEL GEEFT 0, MET `geschat: true`. Dat is een bewuste keuze uit het
+ * origineel en geen vergetelheid: liever een bedrag dat zichtbaar ontbreekt dan
+ * een verzonnen bedrag dat in een budgetmeter gaat meetellen. De vlag zegt dat
+ * de uitkomst niet op echte cijfers stoelt; wie optelt kan daarop filteren en
+ * ziet zo dat er een tarief bijgezet moet worden.
+ */
+export function schatUsd(
+  model: string,
+  usage?: AiVerbruik,
+): { usd: number; input: number; output: number; geschat: boolean } {
+  const tarief = TARIEVEN[model];
+  if (!tarief) return { usd: 0, input: 0, output: 0, geschat: true };
+
+  const input = usage?.prompt_tokens ?? 0;
+  let output = usage?.completion_tokens ?? 0;
+  let geschat = false;
+
+  // Geen usage in het antwoord? Voor beeld kennen we het vaste tokenaantal.
+  if (!output && BEELD_TOKENS[model]) {
+    output = BEELD_TOKENS[model];
+    geschat = true;
+  }
+
+  return {
+    usd: input * tarief.input + output * tarief.output,
+    input,
+    output,
+    geschat,
+  };
+}

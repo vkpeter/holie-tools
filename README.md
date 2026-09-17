@@ -105,6 +105,46 @@ gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
 ⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
 leest nu een array. Neem `[0]` voor het voorkeursmodel.
 
+## Nieuw in 0.8.0 (ai): `leesJson` en `schatUsd`
+
+Twee stukken die in Billara en de podcast-pijplijn dubbel geschreven stonden.
+
+```ts
+import { leesJson, schatUsd, TARIEVEN } from "jsr:@holie/tools@0.8/ai";
+
+const oordeel = leesJson<{ score: number }>(antwoord.content);
+const rijtje = leesJson<string[]>(antwoord.content, { vorm: "array" });
+const { usd, geschat } = schatUsd(antwoord.model, antwoord.usage);
+```
+
+**`leesJson(ruw, opties?)`** peutert JSON uit een modelantwoord, in drie
+stappen: kale `JSON.parse`, dan de inhoud van het eerste codeblok (met of zonder
+`json`-aanduiding), dan alles van de eerste `{` tot de laatste `}` (of `[`/`]`
+met `vorm: "array"`). Lukt niets: `null`. **Geen schemavalidatie** - of de
+velden kloppen weet enkel de aanroeper.
+
+⚠️ **De fence-stap pakt de eerste fence waar dan ook in de tekst**, niet alleen
+aan begin en eind. De twee originelen verschilden hierin; deze variant kan
+strikt meer (een fence middenin, en inhoud die geen object of array is) en
+breekt geen geval van de andere, want een fence aan begin en eind is ook de
+eerste fence. De stappen zijn bovendien een keten: staat er in de eerste fence
+geen geldige JSON, dan krijgt de tekststap alsnog zijn kans.
+
+**`schatUsd(model, usage?)`** rekent tokens om naar dollars en geeft
+`{ usd, input, output, geschat }`. De tarieven staan in **`TARIEVEN`**, in **USD
+per token** (niet per miljoen). Ze zijn afgelezen, niet geschat: Google van de
+Stripe-facturen van de Lovable-gateway, DeepSeek op de cache-miss-prijs van
+$0,27 in / $1,10 uit per M.
+
+⚠️ **Een onbekend model geeft `{ usd: 0, geschat: true }`.** Bewust overgenomen
+uit het origineel: liever een bedrag dat zichtbaar ontbreekt dan een verzonnen
+bedrag dat in een budgetmeter meetelt. Zet er dus geen tarief bij op gevoel -
+wie optelt kan op `geschat` filteren en ziet zo dat er een tarief mist.
+
+Komt er bij een beeldmodel geen `usage` mee, dan valt `schatUsd` terug op het
+vaste tokenaantal per beeld. Zonder die terugval zou een beeldcall als gratis
+geboekt worden, terwijl beeld juist het duurste deel van de rekening is.
+
 ## Nieuw in 0.6.0 (ai): domeinhint en taalnamen voor transcriptie
 
 `transcribeerAudio` kent twee nieuwe sturingen, allebei om de **akoestische**
