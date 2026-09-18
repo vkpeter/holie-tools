@@ -1,12 +1,15 @@
 {
   "name": "@holie/tools",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
     "./talen": "./talen.ts",
     "./mcp-bundel": "./mcp-bundel.ts",
-    "./telegram": "./telegram.ts"
+    "./telegram": "./telegram.ts",
+    "./auth": "./auth.ts",
+    "./html": "./html.ts",
+    "./runslot": "./runslot.ts"
   },
   "publish": {
     "include": [
@@ -14,6 +17,9 @@
       "talen.ts",
       "mcp-bundel.ts",
       "telegram.ts",
+      "auth.ts",
+      "html.ts",
+      "runslot.ts",
       "README.md",
       "LICENSE"
     ]

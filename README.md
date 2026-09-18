@@ -105,6 +105,53 @@ gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
 ⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
 leest nu een array. Neem `[0]` voor het voorkeursmodel.
 
+## Nieuw in 0.9.0: `./auth`, `./runslot` en `./html`
+
+Drie helpers die op 18-09-2026 als eigen kopie in meerdere repo's stonden.
+
+**`./auth`**: geheimen controleren, altijd fail-closed.
+
+```ts
+import {
+  bearerToken,
+  controleerCronGeheim, // env-var, standaard CRON_SECRET (Foodie-stijl)
+  controleerCronGeheimViaDb, // RPC verify_cron_secret (podcast-analyse, Eendje)
+  geheimenGelijk, // constante tijd, op bytes
+  isMachineSleutel, // SUPABASE_SERVICE_ROLE_KEY én SUPABASE_SECRET_KEYS
+} from "jsr:@holie/tools@^0.9/auth";
+
+if (!controleerCronGeheim(req)) {
+  return new Response("unauthorized", { status: 401 });
+}
+const token = bearerToken(req);
+if (token && isMachineSleutel(token)) { /* cron, trigger of andere functie */ }
+```
+
+⚠️ `isMachineSleutel` kijkt ook naar `SUPABASE_SECRET_KEYS` (JSON, meerdere
+sleutels voor rotatie). Enkel tegen `SUPABASE_SERVICE_ROLE_KEY` vergelijken
+weigert een geldige nieuwe `sb_secret_...`-sleutel. De admin-rolcontrole
+(`user_roles`) zit er bewust niet in: die is per project anders.
+
+**`./runslot`**: één run per job tegelijk, met de poort in de database. Vraagt
+per project eenmalig een tabel met een partiële unieke index (SQL staat bovenaan
+`runslot.ts`; standaardtabel `cron_runs`, `tabel: "podcast_runs"` kan ook).
+
+```ts
+import { eindRun, startRun } from "jsr:@holie/tools@^0.9/runslot";
+
+const run = await startRun(db, "weeg");
+if (run.albezig) return new Response("al bezig", { status: 200 });
+// ... werk ...
+await eindRun(db, run.runId, { note: "25 gewogen" });
+```
+
+⚠️ De vervaltermijn (standaard 8 minuten) moet **onder** de cron-interval
+blijven, anders weigert de volgende tik en halveert de capaciteit.
+
+**`./html`**: `escapeHtml` escapet `&`, `<`, `>`, `"` en `'`. `./telegram` voert
+dezelfde functie heruit; nieuw sinds 0.9.0 is dat de apostrof ook meegaat
+(`&#39;`, dat Telegram gewoon als apostrof toont).
+
 ## Nieuw in 0.8.0 (ai): `leesJson` en `schatUsd`
 
 Twee stukken die in Billara en de podcast-pijplijn dubbel geschreven stonden.

@@ -61,14 +61,11 @@ export interface TelegramResultaat {
   fout?: string;
 }
 
-/** Escapet de tekens die Telegram in `parse_mode: "HTML"` als opmaak leest. */
-export function escapeHtml(tekst: string): string {
-  return tekst
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+/**
+ * Escapet de tekens die Telegram in `parse_mode: "HTML"` als opmaak leest. Sinds
+ * 0.9.0 één bron in `./html`; hier heruitgevoerd zodat bestaande imports blijven werken.
+ */
+export { escapeHtml } from "./html.ts";
 
 /**
  * Knipt een tekst in delen van hoogstens `max` tekens, bij voorkeur op een regeleinde.
