@@ -11,8 +11,8 @@ Functions.
 
 Probeert providers in een vaste volgorde en valt door naar de volgende bij een
 fout, een lege of afgekapte inhoud, of een antwoord dat je zelf afkeurt.
-Ondersteunt de Lovable AI-gateway en DeepSeek, allebei OpenAI-compatibel. Geen
-dependencies.
+Ondersteunt Google's gratis Gemini-API, de Lovable AI-gateway en DeepSeek, alle
+drie OpenAI-compatibel. Geen dependencies.
 
 ```ts
 import { callAi } from "jsr:@holie/tools@0.1/ai";
@@ -26,8 +26,8 @@ const { content, provider } = await callAi(
 );
 ```
 
-De sleutels komen uit `LOVABLE_API_KEY` en `DEEPSEEK_API_KEY`, of uit de optie
-`sleutels`. Een provider zonder sleutel wordt overgeslagen.
+De sleutels komen uit `GEMINI_API_KEY`, `LOVABLE_API_KEY` en `DEEPSEEK_API_KEY`,
+of uit de optie `sleutels`. Een provider zonder sleutel wordt overgeslagen.
 
 ## ⚠️ DeepSeek V4 denkt standaard na
 
@@ -72,11 +72,58 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 | `toolsVoor`            | alle providers                  | naar welke providers de tools gaan                                         |
 | `opQuotum`             | `"doorvallen"`                  | `"throw"`: stop bij een 402/429 van Lovable met een `AiQuotumFout`         |
 | `aanvaard`             | geen                            | `(content, provider) => boolean`                                           |
-| `sleutels`             | omgeving                        | `{ lovable?, deepseek? }`                                                  |
+| `sleutels`             | omgeving                        | `{ gemini?, lovable?, deepseek? }`                                         |
 | `bijSucces`, `bijFout` | geen                            | hooks per poging, bv. om verbruik te loggen; een fout erin wordt genegeerd |
 
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
+
+## Nieuw in 0.11.0 (ai): spraak loopt gratis, beeld niet
+
+`transcribeerAudio` gaat nu eerst naar **Google's eigen Gemini-API**, die spraak
+gratis doet, en valt pas terug op de betalende Lovable-gateway.
+`AUDIO_PROVIDERS` staat daarom op `["gemini", "lovable"]`. Zet `GEMINI_API_KEY`
+en er verandert verder niets aan de aanroepers: Google's OpenAI-compatibele
+endpoint neemt dezelfde `input_audio`-payload aan.
+
+Gemeten 19-09-2026 met een echte opname van 3,3 s ("I ate two slices of bread
+and three grapes"): HTTP 200 op de eerste poging, woordelijk correct, 300
+tokens, EUR 0.
+
+```
+gemini-3.5-flash-lite   gratis   standaard
+gemini-3.1-flash-lite   gratis   terugval
+```
+
+**Waarom dit ook voor gebruikersdata mag.** Google traint standaard wél mee op
+gratis input, maar de voorwaarden maken een uitzondering: wie in de EEA,
+Zwitserland of het VK zit, valt onder de Paid Services-voorwaarden, "even though
+they are offered free of charge". Wij zitten in Belgie. ⚠️ Dat is een
+regioregel, geen producteigenschap - draait dit ooit buiten de EEA, dan vervalt
+ze stil.
+
+⛔ **Beeldgeneratie kan dit niet.** Niet opnieuw uitzoeken: een echte call met
+een verse sleutel zonder billing gaf meteen `429 RESOURCE_EXHAUSTED` op zowel
+`gemini-3.1-flash-lite-image` als `gemini-2.5-flash-image`. Het gratis quotum
+voor beeld is nul, niet krap. Verwar het niet met de AI Studio-playground, waar
+beeld wél gratis is - dat is de webinterface, niet de API. `genereerBeeld`
+blijft dus volledig op Lovable.
+
+Twee valkuilen die geld of tijd kosten:
+
+- **De modelnamen verschillen per route.** Google's API kent
+  `gemini-3.5-flash-lite`, de gateway kent dat als
+  `google/gemini-2.5-flash-lite`. Een naam overnemen van de ene naar de andere
+  geeft een 404. Het model waar spraak vóór deze wijziging op draaide is op
+  Google's eigen API zelfs volledig ingetrokken ("no longer available to new
+  users").
+- **Zonder sleutel faalt dit stil.** Een provider zonder sleutel wordt
+  overgeslagen, niet gemeld: staat `GEMINI_API_KEY` nergens, dan loopt alles
+  gewoon door op de betalende route zonder dat iemand het merkt. De logregel per
+  poging (`bijSucces`) vermeldt de provider - dat is de plek waar je het ziet.
+
+Quota gelden **per Google-project**, niet per sleutel: een tweede sleutel in
+hetzelfde project deelt hetzelfde dagquotum.
 
 ## Nieuw in 0.4.0 (ai): audio kiest zijn model, met terugval
 
@@ -314,11 +361,11 @@ const { tekst, provider } = await transcribeerAudio({
 });
 ```
 
-- **De providerkeuze staat op een plek**: `AUDIO_PROVIDERS` (vandaag enkel
-  `["lovable"]`) en `STANDAARD_MODELLEN.lovableAudio`. Wie het model of de
-  provider voor alle spraak wil wijzigen, wijzigt die twee, niet elke aanroeper.
-  De lijst is met opzet een array, zodat een tweede audioprovider erbij kan
-  zonder dat een aanroeper verandert.
+- **De providerkeuze staat op een plek**: `AUDIO_PROVIDERS` (sinds 0.11.0
+  `["gemini", "lovable"]`) met `STANDAARD_MODELLEN.geminiAudio` en
+  `.lovableAudio`. Wie het model of de provider voor alle spraak wil wijzigen,
+  wijzigt die twee, niet elke aanroeper. De lijst is met opzet een array, zodat
+  een tweede audioprovider erbij kan zonder dat een aanroeper verandert.
 - **Een formaat dat het model niet kan lezen loopt hier stuk**, met een
   `TypeError`, voor er een verzoek uitgaat. ⚠️ Dat is geen vormelijkheid: de
   gateway weigert `webm` of `mp4` **niet** netjes, ze verzint dan een plausibel

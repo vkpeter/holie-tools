@@ -4,7 +4,9 @@
  *
  * Probeert providers in een vaste volgorde en valt door naar de volgende bij een
  * fout, een lege of afgekapte inhoud, of een antwoord dat de aanroeper afkeurt.
- * Ondersteunt de Lovable AI-gateway en DeepSeek, allebei OpenAI-compatibel.
+ * Ondersteunt Google's gratis Gemini-API, de Lovable AI-gateway en DeepSeek,
+ * alle drie OpenAI-compatibel. Spraak loopt standaard over de gratis route met
+ * Lovable als terugval; beeld kan alleen op Lovable (zie `lovableBeeld`).
  *
  * ⚠️ DeepSeek V4 denkt standaard na (effort "high"). Die redeneertokens tellen
  * mee in `max_tokens` en worden als output aangerekend. Met een krappe limiet
@@ -14,16 +16,21 @@
  * @module
  */
 
-export type AiProvider = "lovable" | "deepseek";
+export type AiProvider = "gemini" | "lovable" | "deepseek";
 
 export const STANDAARD_MODELLEN = {
   lovable: "google/gemini-3-flash-preview",
   deepseek: "deepseek-v4-flash",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
   /**
-   * Spraak naar tekst, in volgorde van voorkeur. Enkel Lovable: DeepSeek verwerkt
-   * geen audio, dus de keten loopt hier over MODELLEN bij dezelfde provider in
-   * plaats van over providers - zie `transcribeerAudio`.
+   * Spraak naar tekst op de BETALENDE Lovable-gateway, in volgorde van voorkeur.
+   * Dit is sinds 19-09-2026 de TERUGVAL, niet de standaard: `AUDIO_PROVIDERS`
+   * probeert eerst Google's gratis API (`geminiAudio`) en komt hier pas uit als
+   * het gratis dagquotum op is of `GEMINI_API_KEY` ontbreekt.
+   *
+   * ⚠️ De modelnamen hieronder dragen het voorvoegsel `google/`, die van
+   * `geminiAudio` niet. Dat is geen slordigheid maar het verschil tussen de twee
+   * routes: een naam overnemen van de ene naar de andere geeft een 404.
    *
    * ⚠️ DE PRIJS ZIT OP DE AUDIO-MODALITEIT, NIET OP TEKST. Deze lijst stond eerst
    * op 3-flash-preview en daarna kort op 2.5-flash, met "40% goedkoper" als
@@ -60,7 +67,61 @@ export const STANDAARD_MODELLEN = {
     "google/gemini-3.1-flash-lite",
   ],
   /**
+   * Spraak naar tekst op Google's EIGEN gratis API, goedkoopste route eerst.
+   * Dit is de standaard: `AUDIO_PROVIDERS` zet `gemini` vóór `lovable`, zodat
+   * spraak gratis loopt en pas naar de betalende gateway valt als het quotum op
+   * is (429) of de sleutel ontbreekt.
+   *
+   * WAAROM GRATIS MAG, OOK VOOR GEBRUIKERSDATA (nagemeten 19-09-2026 op
+   * ai.google.dev/gemini-api/terms). Google gebruikt standaard wél gratis input
+   * om modellen te trainen, MAAR de voorwaarden zeggen letterlijk: "If you're in
+   * the European Economic Area, Switzerland, or the United Kingdom, the terms
+   * under 'How Google uses Your Data' in 'Paid Services' apply to all Services,
+   * including Google AI Studio and unpaid quota in the Gemini API, even though
+   * they are offered free of charge." Wij zitten in Belgie, dus geen training op
+   * onze prompts.
+   * ⚠️ Dat is een REGIOREGEL, geen producteigenschap. Draait dit ooit vanaf een
+   * server buiten de EEA, dan vervalt die bescherming stilzwijgend.
+   *
+   * ☠️ `gemini-2.5-flash-lite` STAAT HIER BEWUST NIET. Dat model draait nog wel
+   * via de Lovable-gateway, maar Google geeft op de eigen API een 404 terug:
+   * "no longer available to new users". Een modelnaam die bij de ene route werkt
+   * is dus geen bewijs dat hij bij de andere bestaat.
+   *
+   * Gemeten 19-09-2026, echte call met een WAV van 0,5 s stilte:
+   *     gemini-3.5-flash-lite   HTTP 200, "NIETS_VERSTAAN"   <- standaard
+   *     gemini-3.1-flash-lite   HTTP 200, "NIETS_VERSTAAN"   <- terugval
+   *     gemini-2.5-flash        HTTP 200, maar LEGE inhoud   <- niet gebruiken
+   *     gemini-2.5-flash-lite   HTTP 404, ingetrokken
+   *
+   * Beide gekozen modellen gaven het afgesproken NIETS_VERSTAAN op stilte in
+   * plaats van iets te verzinnen. Dat is één meting op één stil fragment en
+   * GEEN kwaliteitsoordeel: de poort bij de aanroeper die toetst of de
+   * hoeveelheid tekst bij de duur past, blijft even hard nodig.
+   *
+   * Limieten gelden PER PROJECT, niet per sleutel: een tweede sleutel in
+   * hetzelfde Google-project deelt hetzelfde dagquotum.
+   */
+  geminiAudio: [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ],
+  /**
    * Beeldgeneratie, goedkoopste eerst. Enkel Lovable: DeepSeek is tekst-only.
+   *
+   * ⛔ DE GRATIS GEMINI-API KAN DIT NIET. Niet opnieuw uitzoeken. Gemeten
+   * 19-09-2026 met een verse AI Studio-sleutel zonder billing: een echte call
+   * naar `gemini-3.1-flash-lite-image` én naar `gemini-2.5-flash-image` gaf
+   * meteen HTTP 429 RESOURCE_EXHAUSTED, "You exceeded your current quota", op de
+   * ALLEREERSTE call. Het gratis quotum voor beeldmodellen is dus nul, niet
+   * krap. De modellen staan wél in `GET /v1/models` - die lijst zegt dus niets
+   * over wat je sleutel mag.
+   *
+   * ⚠️ Verwar dit niet met de AI Studio-playground, waar beeld wél gratis is.
+   * Dat is de webinterface, niet de API.
+   *
+   * Spraak liep dezelfde dag wél gratis: zie `geminiAudio`. Beeld blijft
+   * daarom op de betalende Lovable-gateway.
    *
    * DE PRIJS ZIT OP DE BEELD-MODALITEIT, NIET OP TEKST. Vergelijk op
    * `pricing.output.image` uit `GET /v1/models` (publiek, geen sleutel nodig),
@@ -144,11 +205,20 @@ export function isVideoFormaat(formaat: string): formaat is VideoFormaat {
 }
 
 const ENDPOINT: Record<AiProvider, string> = {
+  /**
+   * Google's eigen OpenAI-compatibele endpoint. Neemt dezelfde payload als de
+   * Lovable-gateway aan (`input_audio` met base64 + format), dus de bestaande
+   * aanroepers hoeven niets te veranderen. Gemeten 19-09-2026 met een
+   * WAV van een halve seconde stilte: HTTP 200 en exact "NIETS_VERSTAAN" terug.
+   */
+  gemini:
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   lovable: "https://ai.gateway.lovable.dev/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 };
 
 const SLEUTEL_VAR: Record<AiProvider, string> = {
+  gemini: "GEMINI_API_KEY",
   lovable: "LOVABLE_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
 };
@@ -560,7 +630,21 @@ export async function callAi(
  * Providers die spraak naar tekst kunnen. Vandaag enkel Lovable, maar dit staat
  * als lijst zodat een tweede provider erbij kan zonder dat een aanroeper wijzigt.
  */
-export const AUDIO_PROVIDERS: AiProvider[] = ["lovable"];
+/**
+ * Providers die spraak aankunnen, in volgorde van voorkeur.
+ *
+ * `gemini` staat vóór `lovable` omdat Google's eigen API spraak GRATIS doet
+ * (gemeten 19-09-2026) terwijl dezelfde modellen via de Lovable-gateway per
+ * token worden aangerekend. Lovable blijft erachter staan als terugval: valt
+ * het gratis dagquotum weg (429) of ontbreekt `GEMINI_API_KEY`, dan loopt
+ * spraak gewoon door op de betalende route in plaats van te breken.
+ *
+ * ⚠️ Een provider zonder sleutel wordt overgeslagen, niet als fout gemeld. Staat
+ * `GEMINI_API_KEY` nergens, dan valt alles stilzwijgend terug op Lovable en
+ * betaal je zonder dat iemand het merkt. De logregel per poging (`bijSucces`)
+ * is de plek waar dat zichtbaar wordt: die vermeldt de provider.
+ */
+export const AUDIO_PROVIDERS: AiProvider[] = ["gemini", "lovable"];
 
 export interface AudioOpties {
   /** Naam in de logregels, bv. "transcribe-and-analyze". */
@@ -703,14 +787,28 @@ export async function transcribeerAudio(
   }
 
   const volgorde = opties.volgorde ?? AUDIO_PROVIDERS;
-  // De keten loopt hier over modellen, niet over providers: er is er maar een die
-  // audio kan, en de terugval is een ander model bij diezelfde gateway.
-  const modellen =
+  // De keten loopt hier over PROVIDERS en binnen elke provider over MODELLEN.
+  // De modelnamen verschillen per provider: Google's eigen API kent
+  // "gemini-3.5-flash-lite", de Lovable-gateway kent dat als
+  // "google/gemini-2.5-flash-lite". Een naam van de ene route werkt niet op de
+  // andere - vandaar een lijst per provider in plaats van een gedeelde.
+  //
+  // Een expliciet meegegeven `model` geldt voor ELKE provider in de volgorde.
+  // Dat is bewust: wie een model afdwingt, wil dat model en niet stilzwijgend
+  // een ander. Wil je per provider iets anders, geef dan `volgorde` met één
+  // provider en roep tweemaal aan.
+  const opgegeven =
     (Array.isArray(opties.model)
       ? opties.model
       : opties.model
       ? [opties.model]
-      : [...STANDAARD_MODELLEN.lovableAudio]).filter(Boolean);
+      : []).filter(Boolean);
+  const modellenVoor = (provider: AiProvider): string[] =>
+    opgegeven.length > 0
+      ? opgegeven
+      : provider === "gemini"
+      ? [...STANDAARD_MODELLEN.geminiAudio]
+      : [...STANDAARD_MODELLEN.lovableAudio];
   const pogingen = Math.max(1, opties.pogingen ?? 1);
   const taalhint = opties.taal
     ? ` De spreker spreekt ${taalnaam(opties.taal)}.`
@@ -741,7 +839,11 @@ export async function transcribeerAudio(
     if (!sleutel) continue;
     beschikbaar.push(provider);
 
-    for (const model of modellen) {
+    // Gaat aan bij een 429 op de gratis route: alle modellen van deze provider
+    // delen hetzelfde projectquotum, dus ze zijn allemaal tegelijk op.
+    let quotumOp = false;
+
+    for (const model of modellenVoor(provider)) {
       for (let poging = 1; poging <= pogingen; poging++) {
         const start = Date.now();
         let status = 0;
@@ -808,6 +910,20 @@ export async function transcribeerAudio(
               status,
               fout: laatsteFout,
             });
+            // Een 429 op de GRATIS route is geen storing maar een opgebruikt
+            // dagquotum: dat is morgen pas over. Herkansen bij hetzelfde model
+            // heeft dan geen zin, en het volgende gratis model deelt hetzelfde
+            // projectquotum - dus meteen door naar de volgende PROVIDER, waar de
+            // betalende gateway klaarstaat. Zonder dit zou een leeg quotum eerst
+            // alle gratis modellen aflopen voor spraak weer werkt.
+            //
+            // ⚠️ Een kale `break` volstaat hier NIET: die verlaat enkel de
+            // pogingenlus, waarna de modellus vrolijk het tweede gratis model
+            // probeert. Vandaar een vlag die de hele provider overslaat.
+            if (status === 429 && provider === "gemini") {
+              quotumOp = true;
+              break;
+            }
             // Een 5xx, 429 of leeg antwoord is tijdelijk: opnieuw bij hetzelfde
             // model. Een 4xx betekent dat DIT model het niet aankan (ingetrokken,
             // formaat geweigerd) - dan heeft herkansen geen zin en is het volgende
@@ -841,7 +957,7 @@ export async function transcribeerAudio(
         }
         if (opties.signal?.aborted) break;
       }
-      if (opties.signal?.aborted) break;
+      if (quotumOp || opties.signal?.aborted) break;
     }
     if (opties.signal?.aborted) break;
   }
@@ -1193,6 +1309,16 @@ export const TARIEVEN: Record<string, { input: number; output: number }> = {
   "google/gemini-2.5-flash": { input: 0.0000003, output: 0.0000025 },
   // DeepSeek, cache miss.
   "deepseek-v4-flash": { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
+  // Spraak op Google's eigen gratis API. Nul, en dat is de hele reden dat die
+  // route vóór Lovable staat. De modelnamen dragen hier GEEN "google/"-voorvoegsel:
+  // dat is precies het verschil tussen deze route en de gateway, dus een
+  // verkeerd geplaatste naam valt hier stil terug op 0 en "geschat".
+  //
+  // ⚠️ Nul geldt zolang er geen billing aan het Google-project hangt. Koppel je
+  // daar ooit een kaart aan, dan lopen deze calls stilzwijgend door aan het
+  // betaaltarief en klopt deze tabel niet meer.
+  "gemini-3.5-flash-lite": { input: 0, output: 0 },
+  "gemini-3.1-flash-lite": { input: 0, output: 0 },
 };
 
 /**

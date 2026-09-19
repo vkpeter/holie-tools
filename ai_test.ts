@@ -415,11 +415,14 @@ Deno.test("een hook die een niet-Error gooit, breekt niets", async () => {
 });
 
 // --- transcribeerAudio -------------------------------------------------------
-// Spraak naar tekst kan alleen naar Lovable: DeepSeek verwerkt geen audio. Deze
-// tests leggen vast dat de providerkeuze op EEN plek staat en dat een formaat dat
-// het model niet kan lezen hier stukloopt, niet stilletjes verzonnen wordt.
+// Spraak naar tekst kan naar Google's gratis API of naar de betalende
+// Lovable-gateway; DeepSeek verwerkt geen audio. Deze tests leggen vast dat de
+// providerkeuze op EEN plek staat, dat de gratis route voorgaat, dat een
+// opgebruikt gratis quotum doorvalt naar de betalende route, en dat een formaat
+// dat het model niet kan lezen hier stukloopt in plaats van stil verzonnen te
+// worden.
 
-Deno.test("transcribeert via Lovable met het audiomodel", async () => {
+Deno.test("transcribeert via Lovable zonder gemini-sleutel", async () => {
   const f = metAntwoorden({ content: "twee sneden brood" });
   try {
     const r = await transcribeerAudio({
@@ -432,6 +435,93 @@ Deno.test("transcribeert via Lovable met het audiomodel", async () => {
     assertEquals(r.provider, "lovable");
     assertEquals(r.model, STANDAARD_MODELLEN.lovableAudio[0]);
     assert(f.aanroepen[0].url.includes("ai.gateway.lovable.dev"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("neemt de gratis Gemini-route vóór de betalende gateway", async () => {
+  const f = metAntwoorden({ content: "twee sneden brood" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assertEquals(r.provider, "gemini");
+    // De modelnaam draagt GEEN "google/"-voorvoegsel: dat hoort bij de gateway,
+    // niet bij Google's eigen API. Een naam van de ene route geeft op de andere
+    // een 404 (gemeten 19-09-2026 met gemini-2.5-flash-lite).
+    assertEquals(r.model, STANDAARD_MODELLEN.geminiAudio[0]);
+    assert(!r.model.startsWith("google/"));
+    assert(f.aanroepen[0].url.includes("generativelanguage.googleapis.com"));
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("valt bij een opgebruikt gratis quotum door naar Lovable", async () => {
+  // Een 429 op de gratis route is een leeg DAGquotum, niet een storing. Het
+  // tweede gratis model deelt hetzelfde projectquotum, dus dat overslaan is het
+  // punt: er hoort precies EEN gratis poging te zijn, en dan de betalende route.
+  const f = metAntwoorden(
+    { status: 429, content: "" },
+    { content: "twee sneden brood" },
+  );
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assertEquals(r.tekst, "twee sneden brood");
+    assertEquals(r.provider, "lovable");
+    assertEquals(f.aanroepen.length, 2);
+    assert(f.aanroepen[0].url.includes("generativelanguage.googleapis.com"));
+    assert(f.aanroepen[1].url.includes("ai.gateway.lovable.dev"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("probeert bij een ingetrokken gratis model wél het volgende", async () => {
+  // Een 404 betekent dat DIT model weg is (zoals gemini-2.5-flash-lite op
+  // 19-09-2026), niet dat het quotum op is: de terugval hoort dan gewoon te
+  // draaien, nog steeds gratis, zonder naar de betalende route te springen.
+  const f = metAntwoorden(
+    { status: 404, content: "" },
+    { content: "twee sneden brood" },
+  );
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assertEquals(r.provider, "gemini");
+    assertEquals(r.model, STANDAARD_MODELLEN.geminiAudio[1]);
+    assertEquals(f.aanroepen.length, 2);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("een afgedwongen model geldt voor elke provider", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      model: "eigen-model",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assertEquals(r.model, "eigen-model");
+    assertEquals(f.aanroepen[0].body.model, "eigen-model");
   } finally {
     f.herstel();
   }
