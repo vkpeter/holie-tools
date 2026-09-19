@@ -78,6 +78,32 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
 
+## Nieuw in 0.12.0 (ai): ook tekst pakt de gratis route mee
+
+`callAi` staat standaard op **`["deepseek", "gemini", "lovable"]`**. DeepSeek is
+spotgoedkoop en heeft geen dagplafond, dus die blijft vooraan; de gratis
+Gemini-API pakt op wat DeepSeek laat vallen, en Lovable is het laatste vangnet.
+
+⚠️ **Gedragswijziging** voor aanroepers die geen `volgorde` meegeven: die kregen
+eerst Lovable. Wie een vaste provider wil, geeft `volgorde` expliciet mee.
+
+Gemeten 19-09-2026 op `gemini-3.5-flash-lite`, echte calls:
+
+| veld                           | uitkomst                    |
+| ------------------------------ | --------------------------- |
+| gewone tekst                   | HTTP 200                    |
+| `response_format: json_object` | HTTP 200, geldige JSON      |
+| tools / function calling       | HTTP 200, `tool_call` terug |
+| `thinking: {type:"disabled"}`  | **HTTP 400** "Unknown name" |
+
+☠️ Dat laatste veld is DeepSeek-specifiek en mag nooit naar Google. Het zit
+daarom in `bouwDeepseekBody` en niet in de gedeelde body; een test bewaakt die
+scheiding. Breekt iemand ze open, dan faalt elke tekst-call op de gratis route
+met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
+
+Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
+morgen pas over, dus de keten valt meteen door.
+
 ## Nieuw in 0.11.0 (ai): spraak loopt gratis, beeld niet
 
 `transcribeerAudio` gaat nu eerst naar **Google's eigen Gemini-API**, die spraak

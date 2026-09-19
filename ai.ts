@@ -19,6 +19,24 @@
 export type AiProvider = "gemini" | "lovable" | "deepseek";
 
 export const STANDAARD_MODELLEN = {
+  /**
+   * Tekst op Google's eigen gratis API. Staat in de standaardvolgorde TUSSEN
+   * DeepSeek en Lovable: DeepSeek is spotgoedkoop en heeft geen dagplafond, dus
+   * die blijft vooraan; gemini pakt gratis wat DeepSeek laat vallen, en Lovable
+   * is het laatste vangnet.
+   *
+   * Gemeten 19-09-2026, echte calls op `gemini-3.5-flash-lite`:
+   *     gewone tekst                     HTTP 200
+   *     response_format json_object      HTTP 200, geldige JSON
+   *     tools / function calling         HTTP 200, tool_call terug
+   *     thinking: {type:"disabled"}      HTTP 400 "Unknown name"
+   *
+   * ⚠️ Dat laatste veld is DeepSeek-specifiek en mag hier NOOIT heen. Het zit
+   * daarom in `bouwDeepseekBody` en niet in de gedeelde body - die scheiding is
+   * wat deze provider bruikbaar maakt. Breekt iemand die open, dan faalt elke
+   * tekst-call met een 400, en dat is een 4xx: de keten herkanst niet.
+   */
+  gemini: "gemini-3.5-flash-lite",
   lovable: "google/gemini-3-flash-preview",
   deepseek: "deepseek-v4-flash",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
@@ -258,8 +276,10 @@ export interface AiOpties {
    * dwingen. Beide providers zijn OpenAI-compatibel.
    */
   responseFormat?: Record<string, unknown>;
-  /** Standaard `["lovable", "deepseek"]`. */
+  /** Standaard `["deepseek", "gemini", "lovable"]`: goedkoop eerst, gratis daarna. */
   volgorde?: AiProvider[];
+  /** Standaard `gemini-3.5-flash-lite`, op Google's gratis API. */
+  geminiModel?: string;
   lovableModel?: string;
   /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
@@ -458,7 +478,14 @@ export async function callAi(
     label,
     maxTokens,
     temperature,
-    volgorde = ["lovable", "deepseek"],
+    // DeepSeek eerst (spotgoedkoop, geen dagplafond), dan de GRATIS Gemini-API,
+    // dan pas de betalende Lovable-gateway. Peter, 19-09-2026: "gemini mag als
+    // backup ook overal tussen deepseek en lovable".
+    //
+    // ⚠️ Dit is een gedragswijziging voor bestaande aanroepers die GEEN volgorde
+    // meegeven: die kregen eerst Lovable. Wie een vaste provider wil, geeft
+    // `volgorde` expliciet mee.
+    volgorde = ["deepseek", "gemini", "lovable"],
     pogingen = 1,
   } = opties;
 
@@ -478,7 +505,9 @@ export async function callAi(
       continue;
     }
 
-    const model = naam === "lovable"
+    const model = naam === "gemini"
+      ? opties.geminiModel ?? STANDAARD_MODELLEN.gemini
+      : naam === "lovable"
       ? opties.lovableModel ?? STANDAARD_MODELLEN.lovable
       : opties.deepseekModel ??
         (opties.beeld
@@ -500,7 +529,9 @@ export async function callAi(
     if (opties.responseFormat) body.response_format = opties.responseFormat;
     if (
       opties.tools &&
-      (opties.toolsVoor ?? ["lovable", "deepseek"]).includes(naam)
+      // Alle drie de providers aanvaarden OpenAI-vorm function calling; voor
+      // gemini nagemeten 19-09-2026 (tool_call terug op HTTP 200).
+      (opties.toolsVoor ?? ["deepseek", "gemini", "lovable"]).includes(naam)
     ) {
       body.tools = opties.tools;
       if (opties.toolChoice !== undefined) body.tool_choice = opties.toolChoice;
@@ -539,7 +570,12 @@ export async function callAi(
           ) {
             throw new AiQuotumFout(resp.status);
           }
-          herkansing = resp.status >= 500 || resp.status === 429;
+          // Een 429 van de GRATIS route is een opgebruikt dagquotum, niet een
+          // tijdelijke drukte: dat is morgen pas over. Herkansen kost enkel tijd,
+          // dus meteen door naar de volgende provider.
+          herkansing = naam === "gemini" && resp.status === 429
+            ? false
+            : resp.status >= 500 || resp.status === 429;
         } else {
           const data = await resp.json();
           const keuze = data.choices?.[0];
@@ -1317,6 +1353,7 @@ export const TARIEVEN: Record<string, { input: number; output: number }> = {
   // ⚠️ Nul geldt zolang er geen billing aan het Google-project hangt. Koppel je
   // daar ooit een kaart aan, dan lopen deze calls stilzwijgend door aan het
   // betaaltarief en klopt deze tabel niet meer.
+  // Ook het tekstmodel op de gratis route; zelfde id als het eerste audiomodel.
   "gemini-3.5-flash-lite": { input: 0, output: 0 },
   "gemini-3.1-flash-lite": { input: 0, output: 0 },
 };

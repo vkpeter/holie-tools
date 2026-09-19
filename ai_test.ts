@@ -31,7 +31,13 @@ type Antwoord = {
   toolCall?: unknown;
 };
 
-const sleutels = { lovable: "test-lov", deepseek: "test-ds" };
+const sleutels = {
+  gemini: "test-gem",
+  lovable: "test-lov",
+  deepseek: "test-ds",
+};
+/** Zonder gratis sleutel: toetst dat de betalende terugval blijft werken. */
+const sleutelsZonderGemini = { lovable: "test-lov", deepseek: "test-ds" };
 const vraag = [{ role: "user", content: "hoi" }];
 
 function metAntwoorden(...antwoorden: Antwoord[]) {
@@ -57,12 +63,73 @@ function metAntwoorden(...antwoorden: Antwoord[]) {
   return { aanroepen, herstel: () => (globalThis.fetch = origineel) };
 }
 
-Deno.test("probeert standaard eerst Lovable", async () => {
+Deno.test("probeert standaard DeepSeek, dan gratis gemini, dan Lovable", async () => {
+  // Sinds 19-09-2026 staat de standaardvolgorde op goedkoop-eerst: DeepSeek is
+  // spotgoedkoop en heeft geen dagplafond, gemini is gratis maar wel geplafonneerd,
+  // Lovable is het betalende vangnet.
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await callAi(vraag, { label: "t", sleutels });
+    assertEquals(r.provider, "deepseek");
+    assert(f.aanroepen[0].url.includes("api.deepseek.com"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("gemini staat tussen DeepSeek en Lovable in", async () => {
+  const f = metAntwoorden(
+    { status: 500, content: "" },
+    { content: "van gemini" },
+  );
+  try {
+    const r = await callAi(vraag, { label: "t", sleutels });
+    assertEquals(r.provider, "gemini");
+    assertEquals(r.model, STANDAARD_MODELLEN.gemini);
+    assert(f.aanroepen[1].url.includes("generativelanguage.googleapis.com"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("stuurt het DeepSeek-only thinking-veld nooit naar gemini", async () => {
+  // ☠️ Google geeft HTTP 400 "Unknown name: thinking" en dat is een 4xx: de keten
+  // herkanst niet. Zou dat veld in de gedeelde body staan, dan faalde elke
+  // tekst-call op de gratis route. Gemeten 19-09-2026.
+  const f = metAntwoorden(
+    { status: 500, content: "" },
+    { content: "ok" },
+  );
+  try {
+    await callAi(vraag, { label: "t", sleutels });
+    assert("thinking" in (f.aanroepen[0].body as Record<string, unknown>));
+    assert(!("thinking" in (f.aanroepen[1].body as Record<string, unknown>)));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("herkanst niet op een 429 van de gratis route", async () => {
+  // Een leeg dagquotum is morgen pas over: doorvallen, niet herkansen.
+  // Alles faalt behalve de laatste provider: gemini krijgt een 429 en mag die
+  // NIET herkansen, ook al staat `pogingen` op 2.
+  const f = metAntwoorden(
+    { status: 429, content: "" },
+    { status: 429, content: "" },
+    { content: "van lovable" },
+  );
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels,
+      pogingen: 2,
+      volgorde: ["gemini", "lovable"],
+    });
     assertEquals(r.provider, "lovable");
-    assert(f.aanroepen[0].url.includes("ai.gateway.lovable.dev"));
+    // gemini x1: de 429 herkanst NIET, anders waren het er hier twee. Lovable
+    // krijgt daarna wel zijn twee pogingen (429 is daar wel tijdelijk), dus 3.
+    assertEquals(f.aanroepen.length, 3);
+    assert(f.aanroepen[0].url.includes("generativelanguage.googleapis.com"));
   } finally {
     f.herstel();
   }
@@ -132,6 +199,7 @@ Deno.test("valt door bij een afgekeurd antwoord, zonder het te herhalen", async 
     const r = await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       pogingen: 2,
       aanvaard: (c) => c !== "Sorry",
     });
@@ -180,6 +248,7 @@ Deno.test("stuurt tools enkel naar de gevraagde providers", async () => {
     await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       tools,
       toolChoice: "auto",
       toolsVoor: ["lovable"],
@@ -196,7 +265,12 @@ Deno.test("geeft tool calls terug", async () => {
     toolCall: { function: { name: "x", arguments: "{}" } },
   });
   try {
-    const r = await callAi(vraag, { label: "t", sleutels, tools: [{}] });
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels,
+      volgorde: ["lovable", "deepseek"],
+      tools: [{}],
+    });
     assertEquals(r.toolCall.function.name, "x");
     assertEquals(r.toolCalls?.length, 1);
   } finally {
@@ -208,7 +282,13 @@ Deno.test("stopt bij een Lovable-quotum als de aanroeper dat vraagt", async () =
   const f = metAntwoorden({ status: 402 });
   try {
     const fout = await assertRejects(
-      () => callAi(vraag, { label: "t", sleutels, opQuotum: "throw" }),
+      () =>
+        callAi(vraag, {
+          label: "t",
+          sleutels,
+          volgorde: ["lovable", "deepseek"],
+          opQuotum: "throw",
+        }),
       AiQuotumFout,
     );
     assertEquals(fout.message, "CREDITS_402");
@@ -226,6 +306,7 @@ Deno.test("roept de hooks aan, en een falende hook breekt niets", async () => {
     await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       bijFout: (p) => {
         fouten.push(p);
         throw new Error("hook stuk");
@@ -270,7 +351,12 @@ Deno.test("noemt de sleutels en de laatste fout als alles faalt", async () => {
   const f = metAntwoorden({ status: 401 });
   try {
     await assertRejects(
-      () => callAi(vraag, { label: "t", sleutels }),
+      () =>
+        callAi(vraag, {
+          label: "t",
+          sleutels,
+          volgorde: ["lovable", "deepseek"],
+        }),
       AiOnbeschikbaar,
       "No AI provider available (sleutels: lovable+deepseek; laatste fout: deepseek gaf 401)",
     );
@@ -290,6 +376,7 @@ Deno.test("stuurt max_tokens en temperature enkel mee als ze opgegeven zijn", as
     await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       maxTokens: 50,
       temperature: 0,
     });
@@ -309,6 +396,7 @@ Deno.test("stuurt response_format mee", async () => {
     await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       responseFormat: { type: "json_object" },
     });
     assertEquals(f.aanroepen[0].body.response_format, { type: "json_object" });
@@ -333,7 +421,12 @@ Deno.test("herkanst bij een netwerkfout binnen dezelfde provider", async () => {
     );
   }) as typeof fetch;
   try {
-    const r = await callAi(vraag, { label: "t", sleutels, pogingen: 2 });
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels,
+      pogingen: 2,
+      volgorde: ["lovable", "deepseek"],
+    });
     assertEquals(r.provider, "lovable");
     assertEquals(urls.length, 2);
     assertEquals(urls[0], urls[1]);
@@ -349,6 +442,7 @@ Deno.test("geeft de lengte van de inhoud mee aan bijSucces", async () => {
     await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       bijSucces: (p) => {
         gezien.push(p);
       },
@@ -365,6 +459,7 @@ Deno.test("herkanst een afgekeurd antwoord bij dezelfde provider als dat gevraag
     const r = await callAi(vraag, {
       label: "t",
       sleutels,
+      volgorde: ["lovable", "deepseek"],
       pogingen: 2,
       aanvaard: (c) => c !== "Sorry",
       herkansBijAfkeuring: true,
@@ -429,7 +524,7 @@ Deno.test("transcribeert via Lovable zonder gemini-sleutel", async () => {
       label: "t",
       base64: "AAAA",
       formaat: "wav",
-      sleutels,
+      sleutels: sleutelsZonderGemini,
     });
     assertEquals(r.tekst, "twee sneden brood");
     assertEquals(r.provider, "lovable");
@@ -636,7 +731,7 @@ Deno.test("gebruikt standaard het goedkoopste audiomodel", async () => {
       label: "t",
       base64: "AAAA",
       formaat: "wav",
-      sleutels,
+      sleutels: sleutelsZonderGemini,
     });
     assertEquals(r.model, "google/gemini-2.5-flash-lite");
     assertEquals(f.aanroepen[0].body.model, "google/gemini-2.5-flash-lite");
@@ -654,7 +749,7 @@ Deno.test("valt bij een 4xx door naar het volgende audiomodel", async () => {
       label: "t",
       base64: "AAAA",
       formaat: "wav",
-      sleutels,
+      sleutels: sleutelsZonderGemini,
     });
     assertEquals(r.tekst, "twee sneden brood");
     assertEquals(r.model, "google/gemini-3.1-flash-lite");
@@ -673,7 +768,7 @@ Deno.test("valt ook bij een 5xx door naar het volgende audiomodel", async () => 
       label: "t",
       base64: "AAAA",
       formaat: "wav",
-      sleutels,
+      sleutels: sleutelsZonderGemini,
     });
     assertEquals(r.model, "google/gemini-3.1-flash-lite");
   } finally {
@@ -707,7 +802,7 @@ Deno.test("geeft op als elk audiomodel faalt", async () => {
           label: "t",
           base64: "AAAA",
           formaat: "wav",
-          sleutels,
+          sleutels: sleutelsZonderGemini,
         }),
       AiOnbeschikbaar,
       "No audio provider available",
