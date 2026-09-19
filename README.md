@@ -105,6 +105,29 @@ gemini-3.1-flash-lite   $0,50/M audio-in  (uit $1,50)   terugval
 ⚠️ **Breaking:** wie `STANDAARD_MODELLEN.lovableAudio` als string gebruikte,
 leest nu een array. Neem `[0]` voor het voorkeursmodel.
 
+## Nieuw in 0.10.0 (auth): `supabaseOauth` voor MCP-servers
+
+`jwksUri` is optioneel in `@lovable.dev/mcp-js`. Laat je hem weg, dan doet élke
+koude isolate eerst een `.well-known`-ontdekking vóór hij een token kan
+verifiëren. De ontdekking wordt enkel binnen één warme isolate gecachet, en
+edge-isolates recyclen constant, dus je betaalt hem in de praktijk per call.
+
+Gemeten 19-09-2026 op Billara: **90-406 ms** bovenop elke call, op een MCP-call
+van ~1.200 ms. Foodie pinde `jwksUri` al; Billara, Eendje en podcast-analyse
+niet - dezelfde scheefgroei als bij `geheimenGelijk`.
+
+```ts
+import { supabaseOauth } from "jsr:@holie/tools@^0.10/auth";
+
+export default defineMcp({
+  // ...
+  auth: auth.oauth.issuer(supabaseOauth(projectRef)),
+});
+```
+
+Neemt een project-ref of een volledige URL. `acceptedAudiences` staat op
+`"authenticated"` en is te overschrijven.
+
 ## Nieuw in 0.9.0: `./auth`, `./runslot` en `./html`
 
 Drie helpers die op 18-09-2026 als eigen kopie in meerdere repo's stonden.

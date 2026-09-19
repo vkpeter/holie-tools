@@ -123,3 +123,44 @@ export async function controleerCronGeheimViaDb(
   });
   return !error && data === true;
 }
+
+/** De OAuth-instellingen die een Lovable-MCP op Supabase nodig heeft. */
+export interface SupabaseOauthOpties {
+  issuer: string;
+  acceptedAudiences: string;
+  jwksUri: string;
+}
+
+/**
+ * OAuth-instellingen voor een Lovable-MCP-server op Supabase.
+ *
+ * Waarom dit bestaat: `jwksUri` is optioneel, en laat je hem weg dan moet élke
+ * koude isolate eerst een `.well-known`-ontdekking doen vóór hij het token kan
+ * verifiëren. `@lovable.dev/mcp-js` cachet die ontdekking enkel binnen één warme
+ * isolate, en edge-isolates recyclen constant, dus in de praktijk betaal je hem
+ * telkens opnieuw.
+ *
+ * Gemeten 19-09-2026 op Billara: die ontdekkingshop kostte 90-406 ms bovenop elke
+ * call, op een MCP-call van ~1.200 ms totaal. Foodie (hapklik) pinde `jwksUri` al;
+ * Billara, Eendje en podcast-analyse niet. Deze helper maakt van die drie regels
+ * één aanroep, zodat de volgende MCP-server hem niet opnieuw kan vergeten.
+ *
+ * ```ts
+ * auth: auth.oauth.issuer(supabaseOauth(projectRef)),
+ * ```
+ *
+ * @param projectRef De Supabase project-ref, of de volledige `https://…`-URL.
+ */
+export function supabaseOauth(
+  projectRef: string,
+  opties: { acceptedAudiences?: string } = {},
+): SupabaseOauthOpties {
+  const basis = projectRef.startsWith("http")
+    ? projectRef.replace(/\/+$/, "")
+    : `https://${projectRef}.supabase.co`;
+  return {
+    issuer: `${basis}/auth/v1`,
+    acceptedAudiences: opties.acceptedAudiences ?? "authenticated",
+    jwksUri: `${basis}/auth/v1/.well-known/jwks.json`,
+  };
+}

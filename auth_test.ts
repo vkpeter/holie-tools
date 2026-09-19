@@ -7,6 +7,7 @@ import {
   geheimenGelijk,
   isMachineSleutel,
   type RpcClient,
+  supabaseOauth,
 } from "./auth.ts";
 
 const envVan = (waarden: Record<string, string>): EnvLezer => (naam) =>
@@ -140,4 +141,34 @@ Deno.test("controleerCronGeheimViaDb: enkel data === true telt", async () => {
       false,
     );
   }
+});
+
+Deno.test("supabaseOauth pint de jwks-URL zodat de ontdekkingshop wegvalt", () => {
+  const o = supabaseOauth("yppnykyovtuwvafeixoa");
+  assertEquals(o.issuer, "https://yppnykyovtuwvafeixoa.supabase.co/auth/v1");
+  assertEquals(
+    o.jwksUri,
+    "https://yppnykyovtuwvafeixoa.supabase.co/auth/v1/.well-known/jwks.json",
+  );
+  assertEquals(o.acceptedAudiences, "authenticated");
+});
+
+Deno.test("supabaseOauth aanvaardt ook een volledige URL, met of zonder slash", () => {
+  for (
+    const invoer of ["https://abc.supabase.co", "https://abc.supabase.co/"]
+  ) {
+    const o = supabaseOauth(invoer);
+    assertEquals(o.issuer, "https://abc.supabase.co/auth/v1");
+    assertEquals(
+      o.jwksUri,
+      "https://abc.supabase.co/auth/v1/.well-known/jwks.json",
+    );
+  }
+});
+
+Deno.test("supabaseOauth laat het publiek overschrijven", () => {
+  assertEquals(
+    supabaseOauth("abc", { acceptedAudiences: "eigen" }).acceptedAudiences,
+    "eigen",
+  );
 });
