@@ -55,18 +55,26 @@ export const STANDAARD_MODELLEN = {
    * motivering. Dat was fout: die $0,30 was het TEKST-tarief. De gateway rekent
    * audio apart aan (`pricing.input.audio` in GET /v1/models, publiek op te
    * vragen). Gemeten 16-09-2026, per M audio-input:
-   *     gemini-2.5-flash-lite   $0,30  (uit $0,40)   <- standaard
-   *     gemini-3.1-flash-lite   $0,50  (uit $1,50)   <- terugval
-   *     gemini-2.5-flash        $1,00  (uit $2,50)
+   *     gemini-2.5-flash-lite   $0,30  (uit $0,40)   <- DEPRECATED, eruit 20-09-2026
+   *     gemini-3.1-flash-lite   $0,50  (uit $1,50)   <- standaard
+   *     gemini-2.5-flash        $1,00  (uit $2,50)   <- terugval
    *     gemini-3-flash-preview  $1,00  (uit $3,00)
-   * De twee die hier eerder stonden waren dus de duurste van het stel.
+   * De twee die hier vóór 16-09-2026 stonden waren de duurste van het stel.
    *
-   * ☠️ 2.5-flash-lite IS DEPRECATED EN VERLOOPT OP 28-01-2027. Dat is bewust
-   * aanvaard (Peter, 16-09-2026): het is de goedkoopste, en 3.1-flash-lite staat
-   * eronder als vangnet zodat spraak blijft werken wanneer het eerste model
-   * wegvalt. ⚠️ Die terugval maakt de vervaldatum minder scherp, maar niet
-   * onschuldig: zodra 2.5-flash-lite stopt, betaal je stilzwijgend het duurdere
-   * tarief. Controleer de lijst rond die datum.
+   * ☑️ 2.5-flash-lite is hier op 20-09-2026 UITGEHAALD, ruim voor zijn
+   * vervaldatum van 28-01-2027. Hij stond hier sinds 16-09-2026 bewust als
+   * goedkoopste ($0,30 tegenover $0,50), met de vervaldatum als aanvaard risico.
+   *
+   * Wat die afweging omdraaide: sinds 19-09-2026 staat `AUDIO_PROVIDERS` op
+   * `["gemini", "lovable"]`, dus deze lijst is de terugval op de GRATIS route en
+   * draait enkel wanneer Google's dagquotum op is. Het prijsverschil tussen
+   * $0,30 en $0,50 geldt dan over een handvol calls, terwijl een vervallend
+   * model in een vangnet een stille faalvorm is: precies wanneer je erop
+   * terugvalt, blijkt hij weg. Nagemeten 20-09-2026 op `GET /v1/models`:
+   * `2.5-flash-lite` staat op `deprecated: true`, `3.1-flash-lite` niet.
+   *
+   * Daarmee is de januari-herinnering overbodig geworden (Peter, 20-09-2026:
+   * "dan kunnen we die todoist van januari ook al afsluiten").
    *
    * ☠️ RECHTVAARDIG DEZE MODELLEN NIET OP KWALITEIT. Bij een test met zeven
    * ingesproken zinnen (16-09-2026) maakten de twee toen geteste modellen allebei
@@ -81,8 +89,8 @@ export const STANDAARD_MODELLEN = {
    * modelkeuze zelf, want het werkt ongeacht wat hier staat.
    */
   lovableAudio: [
-    "google/gemini-2.5-flash-lite",
     "google/gemini-3.1-flash-lite",
+    "google/gemini-2.5-flash",
   ],
   /**
    * Spraak naar tekst op Google's EIGEN gratis API, goedkoopste route eerst.

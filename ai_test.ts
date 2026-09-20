@@ -733,8 +733,8 @@ Deno.test("gebruikt standaard het goedkoopste audiomodel", async () => {
       formaat: "wav",
       sleutels: sleutelsZonderGemini,
     });
-    assertEquals(r.model, "google/gemini-2.5-flash-lite");
-    assertEquals(f.aanroepen[0].body.model, "google/gemini-2.5-flash-lite");
+    assertEquals(r.model, "google/gemini-3.1-flash-lite");
+    assertEquals(f.aanroepen[0].body.model, "google/gemini-3.1-flash-lite");
   } finally {
     f.herstel();
   }
@@ -752,10 +752,10 @@ Deno.test("valt bij een 4xx door naar het volgende audiomodel", async () => {
       sleutels: sleutelsZonderGemini,
     });
     assertEquals(r.tekst, "twee sneden brood");
-    assertEquals(r.model, "google/gemini-3.1-flash-lite");
+    assertEquals(r.model, "google/gemini-2.5-flash");
     assertEquals(f.aanroepen.length, 2);
-    assertEquals(f.aanroepen[0].body.model, "google/gemini-2.5-flash-lite");
-    assertEquals(f.aanroepen[1].body.model, "google/gemini-3.1-flash-lite");
+    assertEquals(f.aanroepen[0].body.model, "google/gemini-3.1-flash-lite");
+    assertEquals(f.aanroepen[1].body.model, "google/gemini-2.5-flash");
   } finally {
     f.herstel();
   }
@@ -770,7 +770,7 @@ Deno.test("valt ook bij een 5xx door naar het volgende audiomodel", async () => 
       formaat: "wav",
       sleutels: sleutelsZonderGemini,
     });
-    assertEquals(r.model, "google/gemini-3.1-flash-lite");
+    assertEquals(r.model, "google/gemini-2.5-flash");
   } finally {
     f.herstel();
   }
