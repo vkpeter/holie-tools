@@ -826,6 +826,10 @@ function metBeeld(
     content?: string;
     status?: number;
     gooi?: unknown;
+    /** Antwoord in het images-formaat van Meta: kale base64, geen data-URL. */
+    metaB64?: string;
+    /** Een 200 in Meta-formaat zonder beeld erin. */
+    metaLeeg?: boolean;
   }[]
 ) {
   const aanroepen: { url: string; body: Record<string, unknown> }[] = [];
@@ -835,6 +839,19 @@ function metBeeld(
     aanroepen.push({ url, body: JSON.parse(String(init.body)) });
     const a = antwoorden[Math.min(i++, antwoorden.length - 1)];
     if (a.gooi) return Promise.reject(a.gooi);
+    if (a.metaB64 || a.metaLeeg) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            created: 1,
+            data: a.metaB64 ? [{ b64_json: a.metaB64 }] : [],
+            output_format: "png",
+            usage: { input_tokens: 9831, output_tokens: 749 },
+          }),
+          { status: a.status ?? 200 },
+        ),
+      );
+    }
     const message = a.dataUrl
       ? { images: [{ image_url: { url: a.dataUrl } }] }
       : { content: a.content ?? "" };
@@ -896,6 +913,139 @@ Deno.test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
   } finally {
     f.herstel();
   }
+});
+
+// --- Meta (Muse Image) als eerste beeldprovider, sinds 0.14.0 ---------------
+
+const PNG_B64 = PNG_1X1.slice(PNG_1X1.indexOf(",") + 1);
+const sleutelsMetMeta = { ...sleutels, meta: "test-meta" };
+
+Deno.test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", async () => {
+  const f = metBeeld({ metaB64: PNG_B64 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "een eend",
+      formaat: "1792x1024",
+      sleutels: sleutelsMetMeta,
+    });
+    assertEquals(r.provider, "meta");
+    assertEquals(r.model, "muse-image-1.0");
+    assertEquals(r.mimeType, "image/png");
+    assert(r.bytes.length > 0);
+    assertEquals(f.aanroepen.length, 1);
+    assert(f.aanroepen[0].url.includes("api.meta.ai/v1/images/generations"));
+    assertEquals(f.aanroepen[0].body, {
+      model: "muse-image-1.0",
+      prompt: "een eend",
+      n: 1,
+      response_format: "b64_json",
+      output_format: "png",
+      size: "1792x1024",
+    });
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: zonder Meta-sleutel loopt alles zoals voorheen over Lovable", async () => {
+  const f = metBeeld({ dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "x",
+      formaat: "1792x1024",
+      sleutels,
+    });
+    assertEquals(r.provider, "lovable");
+    // De Gemini-modellen negeren een maatvraag: het veld gaat niet mee.
+    assertEquals("size" in f.aanroepen[0].body, false);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: een foutstatus bij Meta valt door naar Lovable", async () => {
+  const f = metBeeld({ status: 500 }, { dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "x",
+      sleutels: sleutelsMetMeta,
+    });
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.model, STANDAARD_MODELLEN.lovableBeeld[0]);
+    assertEquals(f.aanroepen.length, 2);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: REGEL 2 geldt per rekening, 402 bij Meta blokkeert Lovable niet", async () => {
+  const f = metBeeld({ status: 402 }, { dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "x",
+      sleutels: sleutelsMetMeta,
+    });
+    assertEquals(r.provider, "lovable");
+    assert(f.aanroepen[1].url.includes("ai.gateway.lovable.dev"));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: REGEL 2 bij de laatste provider geeft nog altijd een AiQuotumFout", async () => {
+  // Meta 500, daarna Lovable 402: geen tweede Lovable-model proberen.
+  const f = metBeeld({ status: 500 }, { status: 402 }, { dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () =>
+        genereerBeeld({ label: "t", prompt: "x", sleutels: sleutelsMetMeta }),
+      AiQuotumFout,
+    );
+    assertEquals(f.aanroepen.length, 2);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: een 200 van Meta zonder beeld valt door naar Lovable", async () => {
+  const f = metBeeld({ metaLeeg: true }, { dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "x",
+      sleutels: sleutelsMetMeta,
+    });
+    assertEquals(r.provider, "lovable");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("beeld: REGEL 1 geldt ook over providers, geen Lovable na een timeout bij Meta", async () => {
+  const f = metBeeld({ gooi: new Error("timeout") }, { dataUrl: PNG_1X1 });
+  try {
+    await assertRejects(
+      () =>
+        genereerBeeld({ label: "t", prompt: "x", sleutels: sleutelsMetMeta }),
+      AiOnbeschikbaar,
+    );
+    assertEquals(f.aanroepen.length, 1);
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("schatUsd: Muse Image kost een vast bedrag per beeld", () => {
+  const r = schatUsd("muse-image-1.0", {
+    input_tokens: 9831,
+    output_tokens: 749,
+  });
+  assertEquals(r.usd, 0.01);
+  assertEquals(r.geschat, false);
 });
 
 Deno.test("REGEL 2: valt bij 402 NIET door naar het volgende model", async () => {

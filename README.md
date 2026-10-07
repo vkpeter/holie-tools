@@ -104,6 +104,27 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.14.0 (ai): beeld gaat eerst naar Meta's Muse Image
+
+`genereerBeeld` loopt nu over twee providers: `BEELD_PROVIDERS` staat op
+`["meta", "lovable"]`. Zet `META_MODEL_API_KEY` en het beeld komt van
+`muse-image-1.0` op de Meta Model API; zonder die sleutel verandert er niets en
+loopt alles over Lovable.
+
+- **Waarom:** $0,01 per gelukt beeld tegen $0,0336 voor het goedkoopste
+  Gemini-model op de gateway, en een hogere Elo op de ranglijst van Artificial
+  Analysis (1115 tegen 1095). Afgelezen 07-10-2026.
+- **Nieuwe optie `formaat`** ("BxH", bv. `"1792x1024"`): Meta volgt de
+  verhouding. De Gemini-modellen negeren ze en krijgen het veld niet mee.
+- **Regel 2 geldt per rekening:** een 402/403/429 bij Meta valt door naar
+  Lovable; de `AiQuotumFout` komt er pas uit als geen provider meer overblijft.
+- **Regel 1 blijft:** na een timeout of netwerkfout bij Meta komt er geen poging
+  bij Lovable. Meta redeneert en zoekt voor het tekent, dus zet `timeoutMs` ruim
+  genoeg.
+- `schatUsd("muse-image-1.0")` geeft de vaste $0,01, niet een tokenbedrag.
+- ⚠️ De terugval is nu 3,4x duurder dan het eerste model. Springt hij vaak in,
+  dan zie je dat op de Lovable-credits.
+
 ## Nieuw in 0.11.0 (ai): spraak loopt gratis, beeld niet
 
 `transcribeerAudio` gaat nu eerst naar **Google's eigen Gemini-API**, die spraak

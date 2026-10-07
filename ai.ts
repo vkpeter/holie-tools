@@ -6,7 +6,8 @@
  * fout, een lege of afgekapte inhoud, of een antwoord dat de aanroeper afkeurt.
  * Ondersteunt Google's gratis Gemini-API, de Lovable AI-gateway en DeepSeek,
  * alle drie OpenAI-compatibel. Spraak loopt standaard over de gratis route met
- * Lovable als terugval; beeld kan alleen op Lovable (zie `lovableBeeld`).
+ * Lovable als terugval; beeld loopt over Meta's Muse Image met Lovable als
+ * terugval (zie `metaBeeld` en `lovableBeeld`).
  *
  * ⚠️ DeepSeek V4 denkt standaard na (effort "high"). Die redeneertokens tellen
  * mee in `max_tokens` en worden als output aangerekend. Met een krappe limiet
@@ -16,7 +17,12 @@
  * @module
  */
 
-export type AiProvider = "gemini" | "lovable" | "deepseek";
+/**
+ * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
+ * beeldgeneratie, geen chat-completions: zet hem niet in de volgorde van
+ * `callAi` of `transcribeerAudio`.
+ */
+export type AiProvider = "gemini" | "lovable" | "deepseek" | "meta";
 
 export const STANDAARD_MODELLEN = {
   /**
@@ -182,6 +188,26 @@ export const STANDAARD_MODELLEN = {
     "google/gemini-3.1-flash-lite-image",
     "google/gemini-2.5-flash-image",
   ],
+  /**
+   * Beeld rechtstreeks bij Meta (Meta Model API), sinds 0.14.0 de eerste keuze
+   * vóór Lovable. Afgelezen 07-10-2026:
+   *   - prijs: $0,01 per gelukt beeld, vast, los van formaat of redeneerwerk
+   *     (dev.meta.ai/docs/image-generation). De goedkoopste Lovable-modellen
+   *     kosten $0,0336 per beeld (1.120 tokens aan $30 per M).
+   *   - kwaliteit: Elo 1115 tegen 1095 voor `gemini-3.1-flash-lite-image` op de
+   *     text-to-image-ranglijst van Artificial Analysis.
+   *   - `size` bepaalt de verhouding; de Gemini-modellen negeren een gevraagde
+   *     verhouding en leveren vierkant.
+   *
+   * ⚠️ De terugval (Lovable) is hier 3,4x duurder dan het eerste model. Dat
+   * breekt de regel "terugval even duur" hierboven, bewust: er is geen tweede
+   * leverancier op $0,01 zonder nog een account. Zie je de terugval vaak
+   * inspringen, dan is dat een kostensignaal en geen detail.
+   *
+   * ⚠️ Zonder `META_MODEL_API_KEY` wordt deze provider overgeslagen en loopt
+   * alles zoals voorheen over Lovable.
+   */
+  metaBeeld: ["muse-image-1.0"],
 } as const;
 
 /** Audioformaten die de Lovable-gateway aanvaardt voor `input_audio`. */
@@ -241,12 +267,15 @@ const ENDPOINT: Record<AiProvider, string> = {
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   lovable: "https://ai.gateway.lovable.dev/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
+  /** Beeldgeneratie, GEEN chat-completions. Enkel voor `genereerBeeld`. */
+  meta: "https://api.meta.ai/v1/images/generations",
 };
 
 const SLEUTEL_VAR: Record<AiProvider, string> = {
   gemini: "GEMINI_API_KEY",
   lovable: "LOVABLE_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
+  meta: "META_MODEL_API_KEY",
 };
 
 /** Tokenverbruik zoals de provider het teruggeeft. */
@@ -1014,8 +1043,12 @@ export async function transcribeerAudio(
   );
 }
 
-/** Providers die beeld kunnen. DeepSeek is tekst-only, dus enkel Lovable. */
-export const BEELD_PROVIDERS: AiProvider[] = ["lovable"];
+/**
+ * Providers die beeld kunnen, in volgorde. DeepSeek is tekst-only. Meta staat
+ * eerst omdat het per beeld het goedkoopst is (zie `metaBeeld`); ontbreekt de
+ * sleutel, dan blijft enkel Lovable over.
+ */
+export const BEELD_PROVIDERS: AiProvider[] = ["meta", "lovable"];
 
 export interface BeeldOpties {
   /** Naam in de logregels, bv. "telegram-webhook". */
@@ -1027,6 +1060,12 @@ export interface BeeldOpties {
    * `STANDAARD_MODELLEN.lovableBeeld`. Een enkele string mag ook.
    */
   model?: string | string[];
+  /**
+   * Verhouding als "BxH", bv. "1792x1024" voor liggend. Enkel Meta volgt dit
+   * (het zet de verhouding, niet de exacte pixelmaat); de Gemini-modellen op
+   * Lovable negeren elke maatvraag en krijgen het veld niet mee.
+   */
+  formaat?: string;
   /** Hoeveel bytes het beeld hoogstens mag zijn. Standaard 10 MB. */
   maxBytes?: number;
   timeoutMs?: number;
@@ -1069,6 +1108,21 @@ export class BeeldGeweigerd extends Error {
 }
 
 /**
+ * Leest het mediatype uit de eerste bytes. Meta zegt in `output_format` wat het
+ * stuurde, maar de varianten-Worker van Eendje vertrouwt op het mediatype, dus
+ * de bytes zelf zijn de betrouwbaarste bron.
+ */
+function beeldMime(bytes: Uint8Array, terugval: string): string {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+  if (
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 &&
+    bytes[9] === 0x45
+  ) return "image/webp";
+  return terugval;
+}
+
+/**
  * Genereert een beeld en geeft de bytes terug.
  *
  * Verhuisd uit Eendjes `supabase/functions/_shared/article-image.ts` op
@@ -1100,12 +1154,23 @@ export class BeeldGeweigerd extends Error {
  * model van een andere leverancier in, toets dan EERST of die veldnamen kloppen.
  * Een terugval die stil breekt op het moment dat hij moet inspringen, is erger
  * dan geen terugval.
+ *
+ * SINDS 0.14.0 LOOPT DE KETEN OOK OVER PROVIDERS: Meta eerst, Lovable erachter.
+ * Meta spreekt het images-formaat (`data[0].b64_json`), niet dat van de gateway.
+ * Twee dingen wijken daardoor af van de regels hierboven:
+ * - Regel 2 geldt PER REKENING. Een 402/403/429 bij Meta zegt niets over het
+ *   tegoed bij Lovable, dus dan mag de volgende PROVIDER het proberen. Pas als
+ *   er geen provider meer overblijft, komt de `AiQuotumFout` eruit.
+ * - Een 200 van Meta zonder beeld is geen weigering met tekst maar een
+ *   onverwacht antwoord: de volgende provider mag het proberen. Dat kan één
+ *   beeld van $0,01 dubbel kosten; een artikel zonder beeld is erger.
+ * Regel 1 blijft onverkort gelden, ook over providers heen.
  */
 export async function genereerBeeld(
   opties: BeeldOpties,
 ): Promise<BeeldAntwoord> {
   const volgorde = opties.volgorde ?? BEELD_PROVIDERS;
-  const modellen =
+  const lovableModellen =
     (Array.isArray(opties.model)
       ? opties.model
       : opties.model
@@ -1116,11 +1181,16 @@ export async function genereerBeeld(
   const beschikbaar: string[] = [];
   let laatsteFout = "";
   let laatsteStatus = 0;
+  let quotumFout: AiQuotumFout | undefined;
 
   for (const provider of volgorde) {
     const sleutel = leesSleutel(provider, opties as unknown as AiOpties);
     if (!sleutel) continue;
     beschikbaar.push(provider);
+    const isMeta = provider === "meta";
+    const modellen = isMeta
+      ? [...STANDAARD_MODELLEN.metaBeeld]
+      : lovableModellen;
 
     for (const model of modellen) {
       const start = Date.now();
@@ -1133,26 +1203,43 @@ export async function genereerBeeld(
             "Content-Type": "application/json",
           },
           signal: combineerSignalen(opties.timeoutMs, opties.signal),
-          body: JSON.stringify({
-            model,
-            messages: [{ role: "user", content: opties.prompt }],
-            modalities: ["image", "text"],
-          }),
+          body: JSON.stringify(
+            isMeta
+              ? {
+                model,
+                prompt: opties.prompt,
+                n: 1,
+                response_format: "b64_json",
+                output_format: "png",
+                ...(opties.formaat ? { size: opties.formaat } : {}),
+              }
+              : {
+                model,
+                messages: [{ role: "user", content: opties.prompt }],
+                modalities: ["image", "text"],
+              },
+          ),
         });
         status = resp.status;
         const duurMs = Date.now() - start;
 
-        // Regel 2: dit gaat over de rekening, niet over het model.
+        // Regel 2: dit gaat over de rekening, niet over het model. Geen ander
+        // model bij deze provider meer proberen; een andere provider heeft een
+        // andere rekening en mag wel.
         if (status === 402 || status === 403 || status === 429) {
+          laatsteStatus = status;
+          laatsteFout = `${provider} gaf ${status}`;
+          console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
           await roep(opties.bijSucces, {
             label: opties.label,
             provider,
             model,
             duurMs,
             status,
-            fout: `${provider} gaf ${status}`,
+            fout: laatsteFout,
           });
-          throw new AiQuotumFout(status === 429 ? 429 : 402);
+          quotumFout = new AiQuotumFout(status === 429 ? 429 : 402);
+          break;
         }
 
         const data = await resp.json().catch(() => ({}));
@@ -1172,6 +1259,54 @@ export async function genereerBeeld(
           // Een foutstatus betekent dat er niets gerenderd en dus niets
           // aangerekend is: het volgende model mag het proberen.
           continue;
+        }
+
+        if (isMeta) {
+          const b64 = data?.data?.[0]?.b64_json;
+          let metaBytes: Uint8Array | undefined;
+          if (typeof b64 === "string" && b64) {
+            try {
+              metaBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+            } catch {
+              metaBytes = undefined;
+            }
+          }
+          if (!metaBytes || metaBytes.length > maxBytes) {
+            laatsteStatus = metaBytes ? 413 : status;
+            laatsteFout = metaBytes
+              ? `beeld te groot (${metaBytes.length} bytes)`
+              : "meta gaf 200 zonder leesbaar beeld";
+            console.warn(`[beeld:${opties.label}] ${laatsteFout}`);
+            await roep(opties.bijSucces, {
+              label: opties.label,
+              provider,
+              model,
+              duurMs,
+              status,
+              usage: data?.usage,
+              fout: laatsteFout,
+            });
+            continue;
+          }
+          await roep(opties.bijSucces, {
+            label: opties.label,
+            provider,
+            model,
+            duurMs,
+            status,
+            usage: data?.usage,
+            lengte: metaBytes.length,
+          });
+          return {
+            bytes: metaBytes,
+            mimeType: beeldMime(
+              metaBytes,
+              `image/${data?.output_format ?? "png"}`,
+            ),
+            provider,
+            model,
+            usage: data?.usage,
+          };
         }
 
         const dataUrl = data?.choices?.[0]?.message?.images?.[0]?.image_url
@@ -1253,8 +1388,12 @@ export async function genereerBeeld(
     if (opties.signal?.aborted) break;
   }
 
+  // Geen enkele provider leverde een beeld en minstens één botste op zijn
+  // rekening: dat is de fout die de aanroeper moet zien.
+  if (quotumFout) throw quotumFout;
+
   throw new AiOnbeschikbaar(
-    `No image provider available (sleutels: ${beschikbaar.join("+") || "geen"}${
+    `No image provider available (sleutels:${beschikbaar.join("+") || "geen"}${
       laatsteFout ? `; laatste fout: ${laatsteFout}` : ""
     })`,
     laatsteStatus,
@@ -1378,6 +1517,15 @@ const BEELD_TOKENS: Record<string, number> = {
 };
 
 /**
+ * Modellen met een vaste prijs per gelukt beeld, in dollar. Meta rekent
+ * `muse-image-1.0` niet per token aan: $0,01 per beeld, los van formaat en
+ * redeneerwerk (dev.meta.ai/docs/image-generation, afgelezen 07-10-2026).
+ */
+const VAST_PER_BEELD: Record<string, number> = {
+  "muse-image-1.0": 0.01,
+};
+
+/**
  * Rekent tokengebruik om naar dollars.
  *
  * ONBEKEND MODEL GEEFT 0, MET `geschat: true`. Dat is een bewuste keuze uit het
@@ -1390,6 +1538,17 @@ export function schatUsd(
   model: string,
   usage?: AiVerbruik,
 ): { usd: number; input: number; output: number; geschat: boolean } {
+  // Vaste prijs per beeld: het tokenverbruik doet er dan niet toe.
+  const vast = VAST_PER_BEELD[model];
+  if (vast !== undefined) {
+    return {
+      usd: vast,
+      input: Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0),
+      output: Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0),
+      geschat: false,
+    };
+  }
+
   const tarief = TARIEVEN[model];
   if (!tarief) return { usd: 0, input: 0, output: 0, geschat: true };
 
