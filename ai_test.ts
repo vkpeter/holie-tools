@@ -10,6 +10,7 @@ import {
   AiQuotumFout,
   AUDIO_FORMATEN,
   BeeldGeweigerd,
+  bouwAnthropicBody,
   bouwDeepseekBody,
   callAi,
   foutTekst,
@@ -1453,4 +1454,255 @@ Deno.test("TARIEVEN staan per token, niet per miljoen", () => {
     assert(t.input < 0.01, `${model} input lijkt per miljoen`);
     assert(t.output < 0.01, `${model} output lijkt per miljoen`);
   }
+});
+
+// --- Claude (Anthropic Messages API) als schakel vóór Lovable, sinds 0.15.0 ---
+
+/** Fetch-mock die per URL een OpenAI- of een Anthropic-antwoord geeft. */
+function metAnthropic(
+  anthropic: { status?: number; body?: Record<string, unknown> },
+  overige: { status?: number; content?: string } = { status: 500 },
+) {
+  const aanroepen: {
+    url: string;
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+  }[] = [];
+  const origineel = globalThis.fetch;
+  globalThis.fetch = ((url: string, init: RequestInit) => {
+    aanroepen.push({
+      url,
+      headers: init.headers as Record<string, string>,
+      body: JSON.parse(String(init.body)),
+    });
+    if (url.includes("api.anthropic.com")) {
+      return Promise.resolve(
+        new Response(JSON.stringify(anthropic.body ?? {}), {
+          status: anthropic.status ?? 200,
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{
+            message: { content: overige.content ?? "" },
+            finish_reason: "stop",
+          }],
+        }),
+        { status: overige.status ?? 200 },
+      ),
+    );
+  }) as typeof fetch;
+  return { aanroepen, herstel: () => (globalThis.fetch = origineel) };
+}
+
+const metClaude = { ...sleutels, anthropic: "test-ant" };
+
+Deno.test("Claude staat tussen gemini en Lovable in", async () => {
+  const f = metAnthropic({
+    body: {
+      content: [{ type: "text", text: "van claude" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 7, output_tokens: 3 },
+    },
+  });
+  try {
+    const r = await callAi(vraag, { label: "t", sleutels: metClaude });
+    assertEquals(r.provider, "anthropic");
+    assertEquals(r.model, "claude-haiku-5-5");
+    assertEquals(r.content, "van claude");
+    assertEquals(r.finishReason, "stop");
+    assertEquals(r.usage?.prompt_tokens, 7);
+    assertEquals(r.usage?.completion_tokens, 3);
+    assertEquals(
+      f.aanroepen.map((a) => new URL(a.url).host),
+      [
+        "api.deepseek.com",
+        "generativelanguage.googleapis.com",
+        "api.anthropic.com",
+      ],
+    );
+    const ant = f.aanroepen[2];
+    assertEquals(ant.headers["x-api-key"], "test-ant");
+    assertEquals(ant.headers["anthropic-version"], "2023-06-01");
+    assert(!("Authorization" in ant.headers));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("zonder Anthropic-sleutel loopt de keten zoals voorheen", async () => {
+  const f = metAnthropic({ status: 500 });
+  try {
+    await assertRejects(() => callAi(vraag, { label: "t", sleutels }));
+    assert(!f.aanroepen.some((a) => a.url.includes("api.anthropic.com")));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("een 400 van Claude (tegoed op) valt door naar Lovable", async () => {
+  // Het maandtegoed op geeft een 400 "credit balance too low". Geen herkansing,
+  // wel de volgende provider: daar is Lovable precies voor.
+  let n = 0;
+  const origineel = globalThis.fetch;
+  globalThis.fetch = ((url: string) => {
+    n++;
+    if (url.includes("api.anthropic.com")) {
+      return Promise.resolve(new Response("credit balance", { status: 400 }));
+    }
+    if (url.includes("lovable.dev")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "lov" }, finish_reason: "stop" }],
+          }),
+        ),
+      );
+    }
+    return Promise.resolve(new Response("", { status: 500 }));
+  }) as typeof fetch;
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels: metClaude,
+      volgorde: ["anthropic", "lovable"],
+      pogingen: 2,
+    });
+    assertEquals(r.provider, "lovable");
+    assertEquals(n, 2);
+  } finally {
+    globalThis.fetch = origineel;
+  }
+});
+
+Deno.test("Claude: system, beeld en toolgeschiedenis in Messages-vorm", () => {
+  const body = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: [
+      { role: "system", content: "Je bent kort." },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "wat zie je" },
+          {
+            type: "image_url",
+            image_url: { url: "data:image/png;base64,QUJD" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "c1",
+          type: "function",
+          function: { name: "zoek", arguments: '{"q":"x"}' },
+        }],
+      },
+      { role: "tool", tool_call_id: "c1", content: "gevonden" },
+    ],
+  });
+  assertEquals(body.system, "Je bent kort.");
+  assertEquals(body.max_tokens, 16000);
+  const m = body.messages as {
+    role: string;
+    content: Record<string, unknown>[];
+  }[];
+  assertEquals(m.map((x) => x.role), ["user", "assistant", "user"]);
+  assertEquals(m[0].content[1], {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "QUJD" },
+  });
+  assertEquals(m[1].content, [
+    { type: "tool_use", id: "c1", name: "zoek", input: { q: "x" } },
+  ]);
+  assertEquals(m[2].content, [
+    { type: "tool_result", tool_use_id: "c1", content: "gevonden" },
+  ]);
+});
+
+Deno.test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
+  // ☠️ Haiku 5.5 geeft een 400 op een niet-standaard temperature en weigert een
+  // afgedwongen tool met denkwerk aan. Een 400 herkanst de keten niet.
+  const body = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: vraag,
+    maxTokens: 200,
+    tools: [{
+      type: "function",
+      function: {
+        name: "zoek",
+        description: "d",
+        parameters: { type: "object" },
+      },
+    }],
+    toolChoice: { type: "function", function: { name: "zoek" } },
+    responseFormat: { type: "json_object" },
+  });
+  assert(!("temperature" in body));
+  assert(!("tool_choice" in body));
+  assert(!("response_format" in body));
+  assertEquals(body.max_tokens, 200);
+  assertEquals(body.tools, [{
+    name: "zoek",
+    description: "d",
+    input_schema: { type: "object" },
+  }]);
+  assert(String(body.system).includes("zoek"));
+  assert(String(body.system).includes("JSON"));
+});
+
+Deno.test("Claude: geeft tool calls terug in OpenAI-vorm", async () => {
+  const f = metAnthropic({
+    body: {
+      content: [{ type: "tool_use", id: "t1", name: "zoek", input: { q: 1 } }],
+      stop_reason: "tool_use",
+    },
+  });
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels: metClaude,
+      volgorde: ["anthropic"],
+      temperature: 0.2,
+      tools: [{ type: "function", function: { name: "zoek", parameters: {} } }],
+    });
+    assertEquals(r.toolCall, {
+      id: "t1",
+      type: "function",
+      function: { name: "zoek", arguments: '{"q":1}' },
+    });
+    assertEquals(r.finishReason, "tool_calls");
+    assert(!("temperature" in f.aanroepen[0].body));
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("Claude: een weigering zonder tekst valt door", async () => {
+  const f = metAnthropic(
+    { body: { content: [], stop_reason: "refusal" } },
+    { content: "lov" },
+  );
+  try {
+    const r = await callAi(vraag, {
+      label: "t",
+      sleutels: metClaude,
+      volgorde: ["anthropic", "lovable"],
+    });
+    assertEquals(r.provider, "lovable");
+  } finally {
+    f.herstel();
+  }
+});
+
+Deno.test("schatUsd kent Claude Haiku 5.5", () => {
+  const r = schatUsd("claude-haiku-5-5", {
+    prompt_tokens: 1_000_000,
+    completion_tokens: 1_000_000,
+  });
+  assertAlmostEquals(r.usd, 0.6);
+  assertEquals(r.geschat, false);
 });

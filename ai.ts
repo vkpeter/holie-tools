@@ -22,7 +22,12 @@
  * beeldgeneratie, geen chat-completions: zet hem niet in de volgorde van
  * `callAi` of `transcribeerAudio`.
  */
-export type AiProvider = "gemini" | "lovable" | "deepseek" | "meta";
+export type AiProvider =
+  | "gemini"
+  | "lovable"
+  | "deepseek"
+  | "anthropic"
+  | "meta";
 
 export const STANDAARD_MODELLEN = {
   /**
@@ -46,6 +51,26 @@ export const STANDAARD_MODELLEN = {
   lovable: "google/gemini-3-flash-preview",
   deepseek: "deepseek-v4-flash",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
+  /**
+   * Claude Haiku 5.5 op Anthropic's eigen Messages API, sinds 0.15.0 de
+   * schakel tussen de gratis Gemini-route en de betalende Lovable-gateway.
+   *
+   * Waarom vóór Lovable: Peters Claude Max-abonnement geeft elke maand USD 100
+   * API-tegoed dat op het einde van de maand vervalt (gekoppeld 16-10-2026).
+   * Wat hier draait, kost dus niets extra tot dat tegoed op is. Peter,
+   * 16-10-2026: "die gratis 100$ credits van claude mag je ook instellen als
+   * backup".
+   *
+   * USD 0,10 in / 0,50 uit per M tokens tot 100.000 tokens per verzoek,
+   * daarboven vijf keer zoveel. ⚠️ Nieuwe tokenizer: dezelfde tekst telt
+   * ongeveer 1,25 keer zoveel tokens als bij Haiku 4.5.
+   *
+   * ⚠️ Geen OpenAI-vorm: `bouwAnthropicBody` vertaalt de berichten, tools en
+   * het antwoord. `temperature` gaat er NOOIT heen (Haiku 5.5 geeft een 400 op
+   * een niet-standaardwaarde), en een afgedwongen tool wordt `auto` met een
+   * instructie, want denkwerk staat aan en verdraagt geen afgedwongen tool.
+   */
+  anthropic: "claude-haiku-5-5",
   /**
    * Spraak naar tekst op de BETALENDE Lovable-gateway, in volgorde van voorkeur.
    * Dit is sinds 19-09-2026 de TERUGVAL, niet de standaard: `AUDIO_PROVIDERS`
@@ -267,6 +292,8 @@ const ENDPOINT: Record<AiProvider, string> = {
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   lovable: "https://ai.gateway.lovable.dev/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
+  /** Messages API, GEEN chat-completions: zie `bouwAnthropicBody`. */
+  anthropic: "https://api.anthropic.com/v1/messages",
   /** Beeldgeneratie, GEEN chat-completions. Enkel voor `genereerBeeld`. */
   meta: "https://api.meta.ai/v1/images/generations",
 };
@@ -275,6 +302,7 @@ const SLEUTEL_VAR: Record<AiProvider, string> = {
   gemini: "GEMINI_API_KEY",
   lovable: "LOVABLE_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
   meta: "META_MODEL_API_KEY",
 };
 
@@ -313,11 +341,16 @@ export interface AiOpties {
    * dwingen. Beide providers zijn OpenAI-compatibel.
    */
   responseFormat?: Record<string, unknown>;
-  /** Standaard `["deepseek", "gemini", "lovable"]`: goedkoop eerst, gratis daarna. */
+  /**
+   * Standaard `["deepseek", "gemini", "anthropic", "lovable"]`: goedkoop eerst,
+   * dan gratis, dan het maandtegoed van Claude, dan pas betalen.
+   */
   volgorde?: AiProvider[];
   /** Standaard `gemini-3.5-flash-lite`, op Google's gratis API. */
   geminiModel?: string;
   lovableModel?: string;
+  /** Standaard `claude-haiku-5-5`. */
+  anthropicModel?: string;
   /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
   /** Laat DeepSeek wél nadenken. Standaard uit, zie de modulekop. */
@@ -408,6 +441,191 @@ export function bouwDeepseekBody(opties: {
     messages: opties.messages,
     ...limieten(opties.maxTokens, opties.temperature),
     thinking: { type: opties.denken ? "enabled" : "disabled" },
+  };
+}
+
+/** Zonder `maxTokens` van de aanroeper; de Messages API eist het veld. */
+const ANTHROPIC_MAX_TOKENS = 16000;
+
+// deno-lint-ignore no-explicit-any
+type Blok = Record<string, any>;
+
+/** Tekst uit een OpenAI-`content`: een string of een lijst delen. */
+function tekstVan(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((d) => d && typeof d === "object" && d.type === "text")
+    .map((d) => String(d.text ?? ""))
+    .join("\n");
+}
+
+/** Een OpenAI-inhoudsdeel als Anthropic-blok, of `undefined` als het niet past. */
+function anthropicDeel(deel: unknown): Blok | undefined {
+  if (!deel || typeof deel !== "object") return undefined;
+  const d = deel as Blok;
+  if (d.type === "text") return { type: "text", text: String(d.text ?? "") };
+  if (d.type === "image_url") {
+    const url = String(d.image_url?.url ?? d.image_url ?? "");
+    const data = url.match(/^data:([^;]+);base64,(.*)$/s);
+    return data
+      ? {
+        type: "image",
+        source: { type: "base64", media_type: data[1], data: data[2] },
+      }
+      : { type: "image", source: { type: "url", url } };
+  }
+  return undefined;
+}
+
+/**
+ * De request-body voor Anthropic's Messages API, vertaald uit de OpenAI-vorm
+ * die de rest van dit pakket spreekt. Staat apart zodat een test kan
+ * vastleggen wat er NIET heen mag.
+ *
+ * - System-berichten worden het `system`-veld.
+ * - `tool`-berichten worden `tool_result`-blokken in een user-bericht, en
+ *   `tool_calls` van de assistent worden `tool_use`-blokken.
+ * - ⛔ `temperature` gaat nooit mee: Haiku 5.5 geeft een 400 op elke
+ *   niet-standaardwaarde, en een 400 herkanst de keten niet.
+ * - Een afgedwongen tool (`required` of een naam) wordt `auto` met een
+ *   instructie in `system`: met denkwerk aan aanvaardt de API geen
+ *   afgedwongen tool.
+ * - `response_format` `json_object` bestaat hier niet zonder schema; het wordt
+ *   een instructie in `system`.
+ */
+export function bouwAnthropicBody(opties: {
+  model: string;
+  messages: unknown[];
+  maxTokens?: number;
+  tools?: unknown[];
+  toolChoice?: unknown;
+  responseFormat?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const systeem: string[] = [];
+  const berichten: { role: string; content: Blok[] }[] = [];
+  const voegToe = (role: string, blokken: Blok[]) => {
+    if (blokken.length === 0) return;
+    const vorige = berichten[berichten.length - 1];
+    if (vorige?.role === role) vorige.content.push(...blokken);
+    else berichten.push({ role, content: blokken });
+  };
+
+  for (const m of opties.messages) {
+    if (!m || typeof m !== "object") continue;
+    const b = m as Blok;
+    if (b.role === "system") {
+      const t = tekstVan(b.content);
+      if (t) systeem.push(t);
+    } else if (b.role === "tool") {
+      voegToe("user", [{
+        type: "tool_result",
+        tool_use_id: String(b.tool_call_id ?? ""),
+        content: tekstVan(b.content) || String(b.content ?? ""),
+      }]);
+    } else {
+      const role = b.role === "assistant" ? "assistant" : "user";
+      const blokken: Blok[] = typeof b.content === "string"
+        ? (b.content ? [{ type: "text", text: b.content }] : [])
+        : Array.isArray(b.content)
+        ? b.content.map(anthropicDeel).filter((x): x is Blok => !!x)
+        : [];
+      if (role === "assistant" && Array.isArray(b.tool_calls)) {
+        for (const tc of b.tool_calls) {
+          let input: unknown = {};
+          try {
+            input = JSON.parse(tc?.function?.arguments || "{}");
+          } catch {
+            input = {};
+          }
+          blokken.push({
+            type: "tool_use",
+            id: String(tc?.id ?? ""),
+            name: String(tc?.function?.name ?? ""),
+            input,
+          });
+        }
+      }
+      voegToe(role, blokken);
+    }
+  }
+
+  const body: Record<string, unknown> = {
+    model: opties.model,
+    max_tokens: opties.maxTokens ?? ANTHROPIC_MAX_TOKENS,
+    messages: berichten,
+    // Een vangnet, geen denkwerk: laag houdt het goedkoop en snel.
+    output_config: { effort: "low" },
+  };
+
+  if (opties.tools && opties.tools.length > 0) {
+    body.tools = opties.tools.map((t) => {
+      const f = (t as Blok)?.function ?? t;
+      return {
+        name: f.name,
+        ...(f.description ? { description: f.description } : {}),
+        input_schema: f.parameters ?? { type: "object", properties: {} },
+      };
+    });
+    const keuze = opties.toolChoice as Blok | string | undefined;
+    if (keuze === "none") body.tool_choice = { type: "none" };
+    else if (keuze === "required") {
+      systeem.push("Gebruik een van de beschikbare tools voor je antwoord.");
+    } else if (keuze && typeof keuze === "object") {
+      const naam = keuze.function?.name ?? keuze.name;
+      if (naam) systeem.push(`Gebruik de tool ${naam} voor je antwoord.`);
+    }
+  }
+
+  if (opties.responseFormat?.type === "json_object") {
+    systeem.push(
+      "Antwoord uitsluitend met één geldig JSON-object, zonder uitleg en zonder codeblok.",
+    );
+  }
+  if (systeem.length > 0) body.system = systeem.join("\n\n");
+  return body;
+}
+
+/** Een Messages API-antwoord in de vorm die `callAi` verder verwerkt. */
+function leesAnthropicAntwoord(data: Blok): {
+  content: string;
+  // deno-lint-ignore no-explicit-any
+  toolCalls?: any[];
+  finishReason?: string;
+  usage?: AiVerbruik;
+} {
+  const blokken: Blok[] = Array.isArray(data.content) ? data.content : [];
+  const content = blokken
+    .filter((b) => b.type === "text")
+    .map((b) => String(b.text ?? ""))
+    .join("");
+  const toolCalls = blokken
+    .filter((b) => b.type === "tool_use")
+    .map((b) => ({
+      id: b.id,
+      type: "function",
+      function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) },
+    }));
+  const reden: Record<string, string> = {
+    end_turn: "stop",
+    stop_sequence: "stop",
+    max_tokens: "length",
+    tool_use: "tool_calls",
+  };
+  const stop = String(data.stop_reason ?? "");
+  const u = data.usage as Blok | undefined;
+  return {
+    content,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    // `refusal` blijft `refusal`: dan is er geen tekst en valt de keten door.
+    finishReason: reden[stop] ?? (stop || undefined),
+    usage: u
+      ? {
+        ...u,
+        prompt_tokens: Number(u.input_tokens ?? 0),
+        completion_tokens: Number(u.output_tokens ?? 0),
+      }
+      : undefined,
   };
 }
 
@@ -522,7 +740,11 @@ export async function callAi(
     // ⚠️ Dit is een gedragswijziging voor bestaande aanroepers die GEEN volgorde
     // meegeven: die kregen eerst Lovable. Wie een vaste provider wil, geeft
     // `volgorde` expliciet mee.
-    volgorde = ["deepseek", "gemini", "lovable"],
+    //
+    // Sinds 0.15.0 staat Claude Haiku 5.5 tussen gemini en Lovable: het
+    // maandelijkse API-tegoed van Claude Max vervalt anders ongebruikt (Peter,
+    // 16-10-2026). Zonder `ANTHROPIC_API_KEY` wordt hij overgeslagen.
+    volgorde = ["deepseek", "gemini", "anthropic", "lovable"],
     pogingen = 1,
   } = opties;
 
@@ -544,6 +766,8 @@ export async function callAi(
 
     const model = naam === "gemini"
       ? opties.geminiModel ?? STANDAARD_MODELLEN.gemini
+      : naam === "anthropic"
+      ? opties.anthropicModel ?? STANDAARD_MODELLEN.anthropic
       : naam === "lovable"
       ? opties.lovableModel ?? STANDAARD_MODELLEN.lovable
       : opties.deepseekModel ??
@@ -554,7 +778,22 @@ export async function callAi(
       ? "deepseek-vision"
       : naam;
 
-    const body: Record<string, unknown> = naam === "deepseek"
+    const metTools = !!opties.tools &&
+      // DeepSeek, gemini en Lovable aanvaarden OpenAI-vorm function calling;
+      // voor gemini nagemeten 19-09-2026 (tool_call terug op HTTP 200).
+      // Anthropic krijgt ze vertaald via `bouwAnthropicBody`.
+      (opties.toolsVoor ?? ["deepseek", "gemini", "anthropic", "lovable"])
+        .includes(naam);
+    const body: Record<string, unknown> = naam === "anthropic"
+      ? bouwAnthropicBody({
+        model,
+        messages,
+        maxTokens,
+        tools: metTools ? opties.tools : undefined,
+        toolChoice: opties.toolChoice,
+        responseFormat: opties.responseFormat,
+      })
+      : naam === "deepseek"
       ? bouwDeepseekBody({
         model,
         messages,
@@ -563,13 +802,10 @@ export async function callAi(
         denken: opties.deepseekDenken,
       })
       : { model, messages, ...limieten(maxTokens, temperature) };
-    if (opties.responseFormat) body.response_format = opties.responseFormat;
-    if (
-      opties.tools &&
-      // Alle drie de providers aanvaarden OpenAI-vorm function calling; voor
-      // gemini nagemeten 19-09-2026 (tool_call terug op HTTP 200).
-      (opties.toolsVoor ?? ["deepseek", "gemini", "lovable"]).includes(naam)
-    ) {
+    if (opties.responseFormat && naam !== "anthropic") {
+      body.response_format = opties.responseFormat;
+    }
+    if (metTools && naam !== "anthropic") {
       body.tools = opties.tools;
       if (opties.toolChoice !== undefined) body.tool_choice = opties.toolChoice;
     }
@@ -581,10 +817,16 @@ export async function callAi(
       try {
         const resp = await fetch(ENDPOINT[naam], {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${sleutel}`,
-            "Content-Type": "application/json",
-          },
+          headers: naam === "anthropic"
+            ? {
+              "x-api-key": sleutel,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json",
+            }
+            : {
+              Authorization: `Bearer ${sleutel}`,
+              "Content-Type": "application/json",
+            },
           body: JSON.stringify(body),
           signal: combineerSignalen(opties.timeoutMs, opties.signal),
         });
@@ -616,10 +858,21 @@ export async function callAi(
         } else {
           const data = await resp.json();
           const keuze = data.choices?.[0];
-          const usage: AiVerbruik | undefined = data.usage;
-          const finishReason: string | undefined = keuze?.finish_reason;
-          const toolCalls = keuze?.message?.tool_calls;
-          const content: string = keuze?.message?.content || "";
+          const vertaald = naam === "anthropic"
+            ? leesAnthropicAntwoord(data)
+            : undefined;
+          const usage: AiVerbruik | undefined = vertaald
+            ? vertaald.usage
+            : data.usage;
+          const finishReason: string | undefined = vertaald
+            ? vertaald.finishReason
+            : keuze?.finish_reason;
+          const toolCalls = vertaald
+            ? vertaald.toolCalls
+            : keuze?.message?.tool_calls;
+          const content: string = vertaald
+            ? vertaald.content
+            : keuze?.message?.content || "";
           const verslag = {
             ...basis,
             duurMs: Date.now() - start,
@@ -1492,6 +1745,10 @@ export const TARIEVEN: Record<string, { input: number; output: number }> = {
   "google/gemini-2.5-flash": { input: 0.0000003, output: 0.0000025 },
   // DeepSeek, cache miss.
   "deepseek-v4-flash": { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
+  // Claude Haiku 5.5 tot 100.000 tokens per verzoek; daarboven vijf keer
+  // zoveel, dat laat deze tabel buiten beschouwing. Betaald uit het
+  // maandtegoed van Claude Max zolang dat niet op is.
+  "claude-haiku-5-5": { input: 0.10 / 1_000_000, output: 0.50 / 1_000_000 },
   // Spraak op Google's eigen gratis API. Nul, en dat is de hele reden dat die
   // route vóór Lovable staat. De modelnamen dragen hier GEEN "google/"-voorvoegsel:
   // dat is precies het verschil tussen deze route en de gateway, dus een

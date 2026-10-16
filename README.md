@@ -55,25 +55,26 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 
 ## Opties
 
-| optie                  | standaard                       | betekenis                                                                  |
-| ---------------------- | ------------------------------- | -------------------------------------------------------------------------- |
-| `label`                | (verplicht)                     | naam in de logregels                                                       |
-| `volgorde`             | `["lovable", "deepseek"]`       | providers in volgorde                                                      |
-| `maxTokens`            | `1000`                          |                                                                            |
-| `temperature`          | `0.2`                           |                                                                            |
-| `lovableModel`         | `google/gemini-3-flash-preview` |                                                                            |
-| `deepseekModel`        | `deepseek-v4-flash`             | met `beeld`: `deepseek-v4-flash-vision-exp`                                |
-| `deepseekDenken`       | `false`                         | DeepSeek laten redeneren                                                   |
-| `beeld`                | `false`                         | de berichten bevatten een beeld                                            |
-| `pogingen`             | `1`                             | pogingen per provider                                                      |
-| `timeoutMs`            | geen                            | per poging                                                                 |
-| `signal`               | geen                            | extern afbreken, bv. een deadline                                          |
-| `tools`, `toolChoice`  | geen                            | function calling                                                           |
-| `toolsVoor`            | alle providers                  | naar welke providers de tools gaan                                         |
-| `opQuotum`             | `"doorvallen"`                  | `"throw"`: stop bij een 402/429 van Lovable met een `AiQuotumFout`         |
-| `aanvaard`             | geen                            | `(content, provider) => boolean`                                           |
-| `sleutels`             | omgeving                        | `{ gemini?, lovable?, deepseek? }`                                         |
-| `bijSucces`, `bijFout` | geen                            | hooks per poging, bv. om verbruik te loggen; een fout erin wordt genegeerd |
+| optie                  | standaard                                        | betekenis                                                                  |
+| ---------------------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `label`                | (verplicht)                                      | naam in de logregels                                                       |
+| `volgorde`             | `["deepseek", "gemini", "anthropic", "lovable"]` | providers in volgorde                                                      |
+| `maxTokens`            | `1000`                                           |                                                                            |
+| `temperature`          | `0.2`                                            |                                                                            |
+| `lovableModel`         | `google/gemini-3-flash-preview`                  |                                                                            |
+| `anthropicModel`       | `claude-haiku-5-5`                               | Claude op de Messages API, zonder `temperature`                            |
+| `deepseekModel`        | `deepseek-v4-flash`                              | met `beeld`: `deepseek-v4-flash-vision-exp`                                |
+| `deepseekDenken`       | `false`                                          | DeepSeek laten redeneren                                                   |
+| `beeld`                | `false`                                          | de berichten bevatten een beeld                                            |
+| `pogingen`             | `1`                                              | pogingen per provider                                                      |
+| `timeoutMs`            | geen                                             | per poging                                                                 |
+| `signal`               | geen                                             | extern afbreken, bv. een deadline                                          |
+| `tools`, `toolChoice`  | geen                                             | function calling                                                           |
+| `toolsVoor`            | alle providers                                   | naar welke providers de tools gaan                                         |
+| `opQuotum`             | `"doorvallen"`                                   | `"throw"`: stop bij een 402/429 van Lovable met een `AiQuotumFout`         |
+| `aanvaard`             | geen                                             | `(content, provider) => boolean`                                           |
+| `sleutels`             | omgeving                                         | `{ gemini?, lovable?, deepseek?, anthropic? }`                             |
+| `bijSucces`, `bijFout` | geen                                             | hooks per poging, bv. om verbruik te loggen; een fout erin wordt genegeerd |
 
 Het antwoord:
 `{ content, toolCall?, toolCalls?, provider, model, finishReason?, usage? }`.
@@ -103,6 +104,28 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
+
+## Nieuw in 0.15.0 (ai): Claude Haiku 5.5 vóór Lovable
+
+`callAi` staat standaard op
+**`["deepseek", "gemini", "anthropic", "lovable"]`**. Claude Max geeft elke
+maand USD 100 API-tegoed dat op het einde van de maand vervalt (gekoppeld
+16-10-2026). Wat DeepSeek en de gratis Gemini-route laten vallen, gaat dus eerst
+naar dat tegoed en pas daarna naar de betalende Lovable-gateway.
+
+- Sleutel: **`ANTHROPIC_API_KEY`** (of `sleutels.anthropic`). Zonder sleutel
+  wordt de schakel overgeslagen en loopt alles zoals in 0.14.
+- Model: `claude-haiku-5-5`, USD 0,10 in / 0,50 uit per M tokens tot 100.000
+  tokens per verzoek. Effort staat op `low`: het is een vangnet.
+- Anthropic spreekt geen OpenAI-vorm. `bouwAnthropicBody` vertaalt system-
+  berichten, beelden, tools en toolgeschiedenis; het antwoord komt terug in de
+  vertrouwde vorm (`content`, `toolCalls`, `usage.prompt_tokens`).
+- ⛔ `temperature` gaat er nooit heen (400 op Haiku 5.5). Een afgedwongen tool
+  wordt `auto` met een instructie, en `response_format: json_object` een
+  instructie in `system`.
+- Tegoed op geeft een 400: geen herkansing, de keten valt door naar Lovable.
+- ⚠️ Projecten met een **eigen `volgorde`** (Eendje, Shintaka) krijgen Claude
+  niet vanzelf: zet `"anthropic"` daar zelf vóór `"lovable"`.
 
 ## Nieuw in 0.14.0 (ai): beeld gaat eerst naar Meta's Muse Image
 
