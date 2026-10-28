@@ -31,10 +31,10 @@ export type AiProvider =
 
 export const STANDAARD_MODELLEN = {
   /**
-   * Tekst op Google's eigen gratis API. Staat in de standaardvolgorde TUSSEN
-   * DeepSeek en Lovable: DeepSeek is spotgoedkoop en heeft geen dagplafond, dus
-   * die blijft vooraan; gemini pakt gratis wat DeepSeek laat vallen, en Lovable
-   * is het laatste vangnet.
+   * Tekst op Google's eigen gratis API. Staat in de standaardvolgorde NA Claude
+   * en DeepSeek en vóór Lovable: Claude gaat voor (Peter, 28-10-2026), DeepSeek
+   * is spotgoedkoop en heeft geen dagplafond, gemini pakt gratis wat die twee
+   * laten vallen, en Lovable is het laatste vangnet.
    *
    * Gemeten 19-09-2026, echte calls op `gemini-3.5-flash-lite`:
    *     gewone tekst                     HTTP 200
@@ -342,8 +342,10 @@ export interface AiOpties {
    */
   responseFormat?: Record<string, unknown>;
   /**
-   * Standaard `["deepseek", "gemini", "anthropic", "lovable"]`: goedkoop eerst,
-   * dan gratis, dan het maandtegoed van Claude, dan pas betalen.
+   * Standaard `["anthropic", "deepseek", "gemini", "lovable"]`: Claude eerst
+   * (Peter, 28-10-2026: Claude vooraan waar hij iets kan betekenen), dan goedkoop,
+   * dan gratis, dan pas betalen. Zonder `ANTHROPIC_API_KEY` wordt Claude
+   * overgeslagen en loopt alles als voorheen.
    */
   volgorde?: AiProvider[];
   /** Standaard `gemini-3.5-flash-lite`, op Google's gratis API. */
@@ -718,9 +720,9 @@ export function aiSleutels(): Partial<Record<AiProvider, string>> {
 
 /** De providers van de standaardketen van `callAi`. */
 export const TEKST_PROVIDERS: AiProvider[] = [
+  "anthropic",
   "deepseek",
   "gemini",
-  "anthropic",
   "lovable",
 ];
 
@@ -784,17 +786,19 @@ export async function callAi(
     label,
     maxTokens,
     temperature,
-    // DeepSeek eerst (spotgoedkoop, geen dagplafond), dan de GRATIS Gemini-API,
-    // dan pas de betalende Lovable-gateway. Peter, 19-09-2026: "gemini mag als
-    // backup ook overal tussen deepseek en lovable".
+    // Sinds 0.19.0 Claude eerst (Peter, 28-10-2026: "claude vooraan zetten in
+    // alle ai flows waar hij iets in kan betekenen"), dan DeepSeek (spotgoedkoop,
+    // geen dagplafond), dan de GRATIS Gemini-API, dan pas de betalende
+    // Lovable-gateway. Peter, 19-09-2026: "gemini mag als backup ook overal
+    // tussen deepseek en lovable".
     //
     // ⚠️ Dit is een gedragswijziging voor bestaande aanroepers die GEEN volgorde
     // meegeven: die kregen eerst Lovable. Wie een vaste provider wil, geeft
     // `volgorde` expliciet mee.
     //
-    // Sinds 0.15.0 staat Claude Haiku 5.5 tussen gemini en Lovable: het
-    // maandelijkse API-tegoed van Claude Max vervalt anders ongebruikt (Peter,
-    // 16-10-2026). Zonder `ANTHROPIC_API_KEY` wordt hij overgeslagen.
+    // Claude Haiku 5.5 staat sinds 0.15.0 in de keten (het maandelijkse
+    // API-tegoed van Claude Max vervalt anders ongebruikt, Peter 16-10-2026) en
+    // sinds 0.19.0 vooraan. Zonder `ANTHROPIC_API_KEY` wordt hij overgeslagen.
     volgorde = TEKST_PROVIDERS,
     pogingen = 1,
   } = opties;

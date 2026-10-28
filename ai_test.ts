@@ -1537,7 +1537,7 @@ function metAnthropic(
 
 const metClaude = { ...sleutels, anthropic: "test-ant" };
 
-test("Claude staat tussen gemini en Lovable in", async () => {
+test("Claude staat vooraan in de standaardvolgorde (sinds 0.19.0)", async () => {
   const f = metAnthropic({
     body: {
       content: [{ type: "text", text: "van claude" }],
@@ -1555,13 +1555,9 @@ test("Claude staat tussen gemini en Lovable in", async () => {
     assertEquals(r.usage?.completion_tokens, 3);
     assertEquals(
       f.aanroepen.map((a) => new URL(a.url).host),
-      [
-        "api.deepseek.com",
-        "generativelanguage.googleapis.com",
-        "api.anthropic.com",
-      ],
+      ["api.anthropic.com"],
     );
-    const ant = f.aanroepen[2];
+    const ant = f.aanroepen[0];
     assertEquals(ant.headers["x-api-key"], "test-ant");
     assertEquals(ant.headers["anthropic-version"], "2023-06-01");
     assert(!("Authorization" in ant.headers));

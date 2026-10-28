@@ -77,7 +77,7 @@ Deno.test("heeftAiSleutel kijkt enkel naar de tekstketen", () => {
   assertEquals(heeftAiSleutel({ meta: "m" }), false);
   assertEquals(heeftAiSleutel({ anthropic: "a" }), true);
   assertEquals(heeftAiSleutel({ meta: "m" }, ["meta"]), true);
-  assertEquals(TEKST_PROVIDERS, ["deepseek", "gemini", "anthropic", "lovable"]);
+  assertEquals(TEKST_PROVIDERS, ["anthropic", "deepseek", "gemini", "lovable"]);
 });
 
 Deno.test("heeftAiSleutel leest zonder argument de omgeving", async () => {

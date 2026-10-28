@@ -61,7 +61,7 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 | optie                  | standaard                                        | betekenis                                                                  |
 | ---------------------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
 | `label`                | (verplicht)                                      | naam in de logregels                                                       |
-| `volgorde`             | `["deepseek", "gemini", "anthropic", "lovable"]` | providers in volgorde                                                      |
+| `volgorde`             | `["anthropic", "deepseek", "gemini", "lovable"]` | providers in volgorde                                                      |
 | `maxTokens`            | `1000`                                           |                                                                            |
 | `temperature`          | `0.2`                                            |                                                                            |
 | `lovableModel`         | `google/gemini-3-flash-preview`                  |                                                                            |
@@ -107,6 +107,24 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
+
+## Nieuw in 0.19.0 (ai): Claude staat vooraan
+
+`callAi` staat standaard op **`["anthropic", "deepseek", "gemini", "lovable"]`**
+(`TEKST_PROVIDERS`). Peter, 28-10-2026: Claude vooraan in elke flow waar hij
+iets kan betekenen. Dat geldt voor tekst, vertalen, samenvatten, classificeren,
+gestructureerde uitvoer (tools/JSON) en beeldanalyse; niet voor spraak
+(`AUDIO_PROVIDERS`) en niet voor beeldgeneratie (`BEELD_PROVIDERS`), want Claude
+kan die niet.
+
+⚠️ **Bump vereist.** `^0.18` sluit 0.19 uit: zet de import op
+`@holie/tools@^0.19`.
+
+- ⚠️ **Gedragswijziging** voor aanroepers zonder eigen `volgorde`: die kregen
+  eerst DeepSeek, nu eerst Claude (betalend, `claude-haiku-5-5`). Zonder
+  `ANTHROPIC_API_KEY` wordt de schakel overgeslagen en verandert er niets.
+- Wie een vaste volgorde wil, geeft `volgorde` expliciet mee.
+- `toolsVoor` blijft een filter (standaard alle providers), geen volgorde.
 
 ## Nieuw in 0.18.0: formulieren en bots, de lat N1-N7/T1-T7
 
@@ -386,11 +404,11 @@ sectie mail.
 
 ## Nieuw in 0.15.0 (ai): Claude Haiku 5.5 vóór Lovable
 
-`callAi` staat standaard op
-**`["deepseek", "gemini", "anthropic", "lovable"]`**. Claude Max geeft elke
-maand USD 100 API-tegoed dat op het einde van de maand vervalt (gekoppeld
-16-10-2026). Wat DeepSeek en de gratis Gemini-route laten vallen, gaat dus eerst
-naar dat tegoed en pas daarna naar de betalende Lovable-gateway.
+`callAi` stond hier op **`["deepseek", "gemini", "anthropic", "lovable"]`**
+(sinds 0.19.0 staat Claude vooraan, zie hierboven). Claude Max geeft elke maand
+USD 100 API-tegoed dat op het einde van de maand vervalt (gekoppeld 16-10-2026).
+Wat DeepSeek en de gratis Gemini-route laten vallen, gaat dus eerst naar dat
+tegoed en pas daarna naar de betalende Lovable-gateway.
 
 - Sleutel: **`ANTHROPIC_API_KEY`** (of `sleutels.anthropic`). Zonder sleutel
   wordt de schakel overgeslagen en loopt alles zoals in 0.14.
