@@ -105,6 +105,66 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.17.0: de hele Bot-API, `./ics` en `claimMetVenster`
+
+Uit de panelreview van Roundbook (28-10-2026): drie stukken die in de webshop,
+Billara en Roundbook elk apart gebouwd stonden.
+
+⚠️ **Bump vereist.** Bij een 0.x-versie sluit `^0.16` de 0.17 uit. Wie iets van
+hieronder wil, zet de import op `@holie/tools@^0.17`.
+
+**telegram (H4, H8, H9).** Eén `telegramApi(token, methode, body)` voor elke
+methode van de Bot API, met de dunne helpers die de webshop zelf schreef:
+
+| helper                                                       | Bot API                  |
+| ------------------------------------------------------------ | ------------------------ |
+| `telegramApi(token, methode, body, opties?)`                 | elke methode             |
+| `stuurTelegramBericht(..., { toetsenbord })`                 | `sendMessage` + keyboard |
+| `bewerkTelegramBericht(token, chatId, messageId, tekst, o?)` | `editMessageText`        |
+| `zetTelegramKnoppen(token, chatId, messageId, knoppen?)`     | `editMessageReplyMarkup` |
+| `beantwoordKlik(token, callbackQueryId, { tekst?, alert? })` | `answerCallbackQuery`    |
+| `zetWebhook(token, url, { geheim?, updates? })`              | `setWebhook`             |
+| `controleerKnoppen(knoppen)`, `pastAlsCallbackData(data)`    | (vooraf toetsen)         |
+
+- Alles gooit nooit, logt niets en houdt het token uit `fout`, zoals
+  `stuurTelegramBericht` al deed. Na een 429 met korte `retry_after` volgt één
+  herkansing, nu voor elke methode.
+- **Knoppen worden vooraf getoetst.** `callback_data` mag 1 tot 64 **bytes**
+  (UTF-8) zijn, niet tekens: 17 emoji is al te veel. Erboven weigert Telegram
+  het hele bericht, tekst incluis. Nu geeft het `ok: false` zonder verzoek, met
+  de knop in `fout` ("knop 2.1 ... 65 bytes"). Ook een knop zonder tekst, of met
+  zowel `callback_data` als `url`, wordt geweigerd.
+- **Vast toetsenbord**:
+  `toetsenbord: { keyboard, is_persistent, resize_keyboard }` of
+  `toetsenbord: "weg"`. Niet samen met `knoppen` (één `reply_markup`).
+- **Bewerken haalt standaard de knoppen weg.** Wil je ze houden, geef ze opnieuw
+  mee. "message is not modified" telt als gelukt, met `ongewijzigd: true`: dat
+  is een dubbele klik, geen fout.
+- ⚠️ `zetWebhook` zonder `updates` houdt de vorige instelling aan. Wie knopkliks
+  wil, zet `callback_query` er expliciet in.
+
+```ts
+import {
+  beantwoordKlik,
+  bewerkTelegramBericht,
+} from "jsr:@holie/tools@^0.17/telegram";
+
+await beantwoordKlik(token, cq.id); // altijd, anders blijft de knop "laden"
+const r = await bewerkTelegramBericht(
+  token,
+  cq.message.chat.id,
+  cq.message.message_id,
+  `${tekst}\n\n✅ Bevestigd door ${escapeHtml(naam)}`,
+);
+if (!r.ok) console.warn("telegram:", r.fout);
+```
+
+**ics (H6).** Nieuwe ingang `./ics`: een iCalendar-feed (RFC 5545) met een
+generiek event-type. Zie de sectie ics.
+
+**runslot (H7).** `claimMetVenster` en `geefClaimVrij`: een rem in de database,
+eenmalig of met een venster. Zie de sectie runslot.
+
 ## Nieuw in 0.16.0: sleutels buiten Deno, `kiesTaal` en `./mail`
 
 **ai.** `callAi`, `transcribeerAudio` en `genereerBeeld` lezen hun sleutels nu
@@ -631,6 +691,9 @@ if (!controleerWebhookGeheim(req, Deno.env.get("TELEGRAM_WEBHOOK_SECRET"))) {
 - `controleerWebhookGeheim` weigert altijd als er geen verwacht geheim is.
 - `leidWebhookGeheimAf(token)` geeft een geheim afgeleid van het token (SHA-256,
   base64url), gelijk aan wat Eagle-Eye Scissors al gebruikt.
+- Sinds 0.17.0: `telegramApi` voor elke methode, `bewerkTelegramBericht`,
+  `zetTelegramKnoppen`, `beantwoordKlik`, `zetWebhook`, een vast `toetsenbord`
+  en `controleerKnoppen` (64 bytes). Zie "Nieuw in 0.17.0".
 
 **Privacy en sleutels.** De module leest geen omgevingsvariabelen, bevat geen
 tokens, chat-id's of ontvangers en logt niets. Het token staat in de URL van de
@@ -668,6 +731,86 @@ Eén mail via de Resend-API, enkel met `fetch`. Ook `cc` en `bcc`; `to`, `cc`,
 gelogd, en `fout` is altijd ontdaan van de sleutel. Het project kiest zelf
 sleutel en afzender: een Resend-sleutel is aan zijn eigen geverifieerde domein
 gebonden, en een gekruiste sleutel geeft een 403.
+
+## ics
+
+```ts
+import { bouwIcs, ICS_CONTENT_TYPE } from "jsr:@holie/tools@^0.17/ics";
+
+const ics = bouwIcs({
+  prodId: "-//Roundbook//Afspraken//NL",
+  naam: "Afspraken",
+  verversen: "PT1H",
+  events: [
+    {
+      uid: `${a.id}@roundbook.eu`,
+      begin: { datum: "2026-11-03", tijd: "09:30" }, // lokale tijd, TZID
+      duur: "PT1H",
+      titel: "Te bevestigen: Salon X (Lier)",
+      locatie: "Lier",
+      status: "TENTATIVE",
+      gewijzigd: a.gewijzigd_op,
+    },
+    { uid: "x@y", begin: { datum: "2026-11-04" }, titel: "Hele dag" },
+  ],
+});
+return new Response(ics, { headers: { "Content-Type": ICS_CONTENT_TYPE } });
+```
+
+- `begin`/`einde`: `{ datum }` (hele dag), `{ datum, tijd }` (lokaal, in de
+  kalendertijdzone, standaard Europe/Brussels met een vaste VTIMEZONE) of een
+  `Date` (UTC). Een hele dag zonder einde loopt tot de volgende dag; `einde` is
+  zoals in RFC 5545 de eerste dag die er níet meer bij hoort.
+- Vouwt op 75 octetten (UTF-8, nooit midden in een teken), escapet TEXT
+  (backslash eerst), enkel CRLF. Losse bouwstenen: `escapeIcsTekst`,
+  `vouwIcsRegel`, `VTIMEZONE_BRUSSEL`.
+- **Een ongeldig event wordt overgeslagen** (datum die niet bestaat, 24:00,
+  `duur` samen met `einde`, url met regeleinde), zodat één slechte rij de hele
+  feed niet breekt. Met `{ opOngeldig: "gooi" }` komt er een `TypeError`. Een
+  fout op kalenderniveau (lege `prodId`) gooit altijd.
+- **Injectie dicht.** `prodId`, `uid` en `tzid` verliezen hun controletekens:
+  een CR/LF in een invoerveld kan geen eigen regel in de feed zetten.
+- **Wat erin mag, beslist het project.** De module filtert geen mail of
+  telefoonnummer uit titels; Roundbook houdt daar zijn eigen `zonderContact`
+  voor. De vertaling van dagdeel en status naar een event blijft ook daar.
+- De volgorde van de eigenschappen is die van Roundbook. Een test bewaakt dat
+  Roundbooks twee standaardgevallen byte-gelijk uitkomen, dus de overstap
+  verandert de feed niet.
+
+## runslot: rem met venster (0.17.0)
+
+`claimMetVenster` is een rem die in de **database** staat: een conditionele
+UPDATE die enkel slaagt als de kolom leeg is, of (met `vensterMs`) ouder dan het
+venster. Postgres zet gelijktijdige UPDATEs op dezelfde rij achter elkaar, dus
+precies één aanroeper krijgt een rij terug. Hetzelfde patroon stond in
+`roundbook-herstel`, in Billara's `claimMelding` en in `startRun`.
+
+```ts
+import { claimMetVenster, geefClaimVrij } from "jsr:@holie/tools@^0.17/runslot";
+
+const opties = {
+  tabel: "client_member",
+  kolom: "laatste_herstel_op",
+  sleutel: { email },
+  vensterMs: 10 * 60 * 1000,
+};
+const claim = await claimMetVenster(db, {
+  ...opties,
+  extra: (q) => q.eq("actief", true).not("lid_user_id", "is", null),
+  select: "naam",
+});
+if (!claim.geclaimd) return; // al een mail in de laatste 10 minuten
+const r = await sendMail({/* ... */});
+if (!r.ok) await geefClaimVrij(db, opties, claim.stempel); // meteen opnieuw kunnen
+```
+
+- Zonder `vensterMs` is de rem eenmalig (`kolom is null`), zoals `claimMelding`.
+- **Fail-closed:** een databasefout gooit. Nooit `geclaimd: true` bij twijfel,
+  want een rem die bij twijfel toch doorlaat is geen rem.
+- `geefClaimVrij` zet de kolom terug op `null`, maar enkel als de stempel nog de
+  onze is: een latere claim van iemand anders blijft staan.
+- Zonder sleutel, met een sleutelwaarde `null`/`undefined` of met een venster
+  `<= 0` komt er een `TypeError` zonder verzoek: nooit een hele tabel claimen.
 
 ## Ontwikkelen
 

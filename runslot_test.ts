@@ -1,15 +1,22 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { eindRun, RUN_TTL_MS, startRun } from "./runslot.ts";
+import {
+  claimMetVenster,
+  eindRun,
+  geefClaimVrij,
+  RUN_TTL_MS,
+  startRun,
+} from "./runslot.ts";
 
 /** Een nep-client die de ketting van supabase-js naspeelt en elke stap logt. */
 function nepDb(
   insertAntwoord: { data: unknown; error: unknown },
   updateFout: unknown = null,
+  updateData: unknown = undefined,
 ) {
   const log: unknown[] = [];
   const keten = (stappen: unknown[], eind: unknown) => {
     const k: Record<string, unknown> = {};
-    for (const m of ["eq", "is", "lt", "select"]) {
+    for (const m of ["eq", "is", "lt", "or", "not", "select"]) {
       k[m] = (...a: unknown[]) => {
         stappen.push([m, ...a]);
         return k;
@@ -25,7 +32,7 @@ function nepDb(
         update(velden: unknown) {
           const stappen: unknown[] = [["update", tabel, velden]];
           log.push(stappen);
-          return keten(stappen, { error: updateFout });
+          return keten(stappen, { data: updateData, error: updateFout });
         },
         insert(rij: unknown) {
           const stappen: unknown[] = [["insert", tabel, rij]];
@@ -88,4 +95,163 @@ Deno.test("eindRun zet finished_at en gooit bij een fout", async () => {
 
   const fout = nepDb({ data: null, error: null }, { message: "boem" });
   await assertRejects(() => eindRun(fout.db, "r1"));
+});
+
+const OPTIES = {
+  tabel: "client_member",
+  kolom: "laatste_herstel_op",
+  sleutel: { email: "a@b.be" },
+};
+
+Deno.test("claimMetVenster: zonder venster is het eenmalig (is null), geen or", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [{ id: 1 }]);
+  const claim = await claimMetVenster(db, OPTIES);
+  assertEquals(claim.geclaimd, true);
+
+  const stappen = (log as unknown[][][])[0];
+  assertEquals(stappen[0][0], "update");
+  assertEquals(stappen[0][1], "client_member");
+  assertEquals(stappen[0][2], { laatste_herstel_op: claim.stempel });
+  assertEquals(stappen.some((s) => s[0] === "or"), false);
+  assertEquals(stappen.some((s) => s[0] === "lt"), false);
+  assertEquals(stappen[stappen.length - 2], ["is", "laatste_herstel_op", null]);
+});
+
+Deno.test("claimMetVenster: met venster de juiste or-tekst met aanhalingstekens", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [{ id: 1 }]);
+  const voor = Date.now();
+  const venster = 10 * 60 * 1000;
+  await claimMetVenster(db, { ...OPTIES, vensterMs: venster });
+
+  const stappen = (log as unknown[][][])[0];
+  assertEquals(stappen.some((s) => s[0] === "is"), false);
+  const or = stappen.find((s) => s[0] === "or") as string[];
+  const m = or[1].match(
+    /^laatste_herstel_op\.is\.null,laatste_herstel_op\.lt\."([^"]+)"$/,
+  );
+  assertEquals(m !== null, true);
+  const grens = Date.parse(m![1]);
+  assertEquals(Math.abs(grens - (voor - venster)) < 5000, true);
+});
+
+Deno.test("claimMetVenster: keten loopt update, sleutel-eq's, extra, remfilter, select", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [
+    { naam: "Piet" },
+  ]);
+  const claim = await claimMetVenster<{ naam: string }>(db, {
+    tabel: "client_member",
+    kolom: "laatste_herstel_op",
+    sleutel: { email: "a@b.be", site: 7 },
+    vensterMs: 60_000,
+    extra: (q) => q.eq("actief", true).not("lid_user_id", "is", null),
+    select: "naam",
+  });
+  assertEquals(claim.rijen, [{ naam: "Piet" }]);
+
+  const stappen = (log as unknown[][][])[0];
+  assertEquals(stappen.map((s) => s[0]), [
+    "update",
+    "eq",
+    "eq",
+    "eq",
+    "not",
+    "or",
+    "select",
+  ]);
+  assertEquals(stappen[1], ["eq", "email", "a@b.be"]);
+  assertEquals(stappen[2], ["eq", "site", 7]);
+  assertEquals(stappen[3], ["eq", "actief", true]);
+  assertEquals(stappen[4], ["not", "lid_user_id", "is", null]);
+  assertEquals(stappen[6], ["select", "naam"]);
+});
+
+Deno.test("claimMetVenster: standaard select is *", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, []);
+  await claimMetVenster(db, OPTIES);
+  const stappen = (log as unknown[][][])[0];
+  assertEquals(stappen[stappen.length - 1], ["select", "*"]);
+});
+
+Deno.test("claimMetVenster: geen rij terug is geclaimd false", async () => {
+  const leeg = nepDb({ data: null, error: null }, null, []);
+  assertEquals((await claimMetVenster(leeg.db, OPTIES)).geclaimd, false);
+  const geen = nepDb({ data: null, error: null }, null, null);
+  const claim = await claimMetVenster(geen.db, OPTIES);
+  assertEquals(claim.geclaimd, false);
+  assertEquals(claim.rijen, []);
+});
+
+Deno.test("claimMetVenster: een rij terug is geclaimd true met de rijen en de stempel", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [
+    { naam: "A" },
+    { naam: "B" },
+  ]);
+  const claim = await claimMetVenster(db, OPTIES);
+  assertEquals(claim.geclaimd, true);
+  assertEquals(claim.rijen, [{ naam: "A" }, { naam: "B" }]);
+  assertEquals(new Date(claim.stempel).toISOString(), claim.stempel);
+  const velden = ((log as unknown[][][])[0][0] as unknown[])[2];
+  assertEquals(velden, { laatste_herstel_op: claim.stempel });
+});
+
+Deno.test("claimMetVenster: een databasefout wordt gegooid (fail-closed)", async () => {
+  const { db } = nepDb({ data: null, error: null }, { message: "boem" });
+  await assertRejects(() => claimMetVenster(db, OPTIES));
+});
+
+Deno.test("claimMetVenster: ongeldige invoer geeft TypeError zonder databaseverzoek", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [{ id: 1 }]);
+  const slecht = [
+    { ...OPTIES, sleutel: {} },
+    { ...OPTIES, tabel: "" },
+    { ...OPTIES, kolom: "" },
+    { ...OPTIES, vensterMs: 0 },
+    { ...OPTIES, vensterMs: -5 },
+    { ...OPTIES, vensterMs: NaN },
+    { ...OPTIES, vensterMs: Infinity },
+    { ...OPTIES, sleutel: { email: undefined as unknown as string } },
+  ];
+  for (const o of slecht) {
+    await assertRejects(() => claimMetVenster(db, o), TypeError);
+  }
+  assertEquals(log.length, 0);
+});
+
+Deno.test("geefClaimVrij: filtert op sleutel en stempel en zet null", async () => {
+  const { db, log } = nepDb({ data: null, error: null }, null, [{ id: 1 }]);
+  assertEquals(
+    await geefClaimVrij(db, OPTIES, "2026-10-28T10:00:00.000Z"),
+    true,
+  );
+  const stappen = (log as unknown[][][])[0];
+  assertEquals(stappen[0], [
+    "update",
+    "client_member",
+    { laatste_herstel_op: null },
+  ]);
+  assertEquals(stappen[1], ["eq", "email", "a@b.be"]);
+  assertEquals(stappen[2], [
+    "eq",
+    "laatste_herstel_op",
+    "2026-10-28T10:00:00.000Z",
+  ]);
+  assertEquals(stappen[3], ["select", "laatste_herstel_op"]);
+});
+
+Deno.test("geefClaimVrij: rem al van iemand anders is false", async () => {
+  const { db } = nepDb({ data: null, error: null }, null, []);
+  assertEquals(await geefClaimVrij(db, OPTIES, "x"), false);
+});
+
+Deno.test("geefClaimVrij: gooit bij een fout, en TypeError bij ongeldige invoer zonder verzoek", async () => {
+  const fout = nepDb({ data: null, error: null }, { message: "boem" });
+  await assertRejects(() => geefClaimVrij(fout.db, OPTIES, "x"));
+
+  const { db, log } = nepDb({ data: null, error: null }, null, [{ id: 1 }]);
+  await assertRejects(
+    () => geefClaimVrij(db, { ...OPTIES, sleutel: {} }, "x"),
+    TypeError,
+  );
+  await assertRejects(() => geefClaimVrij(db, OPTIES, ""), TypeError);
+  assertEquals(log.length, 0);
 });
