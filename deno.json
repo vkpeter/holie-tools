@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -9,7 +9,8 @@
     "./telegram": "./telegram.ts",
     "./auth": "./auth.ts",
     "./html": "./html.ts",
-    "./runslot": "./runslot.ts"
+    "./runslot": "./runslot.ts",
+    "./mail": "./mail.ts"
   },
   "publish": {
     "include": [
@@ -20,6 +21,7 @@
       "auth.ts",
       "html.ts",
       "runslot.ts",
+      "mail.ts",
       "README.md",
       "LICENSE"
     ]

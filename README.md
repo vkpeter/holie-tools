@@ -105,6 +105,33 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.16.0: sleutels buiten Deno, `kiesTaal` en `./mail`
+
+**ai.** `callAi`, `transcribeerAudio` en `genereerBeeld` lezen hun sleutels nu
+eerst uit `Deno.env` en, als dat niets geeft, uit `process.env`. In een
+Cloudflare Worker met `nodejs_compat` (ESE, Eagle-Eye) vinden ze de secrets dus
+zelf. Vroeger gaf de `try/catch` rond `Deno.env` daar stil "geen sleutel", en
+moest elk project een eigen `aiSleutels()` meegeven
+(`src/lib/ai-sleutels.server.ts`). Die shim kan weg:
+
+```ts
+import { aiSleutels, callAi, heeftAiSleutel } from "@holie/tools/ai";
+
+if (!heeftAiSleutel()) throw new Error("geen AI-sleutel");
+await callAi(berichten, { label: "vertaal" }); // sleutels: niet meer nodig
+```
+
+- `aiSleutels()` geeft de sleutels uit de omgeving (lege waarden tellen niet).
+- `heeftAiSleutel(sleutels?, providers?)` kijkt standaard naar de tekstketen
+  (`TEKST_PROVIDERS`, zonder `meta`), net als de oude shim.
+- Een meegegeven `sleutels` wint nog altijd van de omgeving.
+
+**talen.** `kiesTaal` kiest de taal van een verzoek uit cookie, Accept-Language
+(met q-gewichten) en standaard. Zie de sectie talen.
+
+**mail.** Nieuwe ingang `@holie/tools/mail` met `sendMail` voor Resend. Zie de
+sectie mail.
+
 ## Nieuw in 0.15.0 (ai): Claude Haiku 5.5 vóór Lovable
 
 `callAi` staat standaard op
@@ -479,6 +506,50 @@ Pure logica zonder imports: een catalogus van talen, welke daarvan beschikbaar
 zijn (oude links blijven werken) en welke actief zijn (wat de bezoeker ziet en
 waarnaar vertaald wordt). Elke site kiest zijn eigen actieve talen.
 
+### Taal van een verzoek kiezen (0.16.0)
+
+```ts
+import { kiesTaal } from "@holie/tools/talen";
+
+// Server (TanStack Start):
+const req = getRequest();
+const lang = kiesTaal({
+  talen: PROJECT_LANGUAGES,
+  standaard: DEFAULT_LANGUAGE,
+  cookie: req.headers.get("cookie"),
+  cookieNaam: "ese.lang",
+  acceptLanguage: req.headers.get("accept-language"),
+});
+
+// Browser:
+kiesTaal({
+  talen: PROJECT_LANGUAGES,
+  standaard: DEFAULT_LANGUAGE,
+  cookie: document.cookie,
+  cookieNaam: "ese.lang",
+  acceptLanguage: navigator.languages,
+});
+```
+
+Volgorde: de taalcookie (als die een taal van de site bevat), dan de ingang van
+Accept-Language met het hoogste q-gewicht die past, dan `standaard`. Een
+regiocode valt terug op de hoofdtaal (`nl-BE` wordt `nl`, `fr-CH` wordt `fr`).
+
+| Accept-Language           | talen `en,nl,de,fr`, standaard `en` |
+| ------------------------- | ----------------------------------- |
+| `nl-BE,nl;q=0.9,en;q=0.8` | `nl`                                |
+| `es;q=1,nl;q=0.4`         | `nl` (oude kopieën: `en`)           |
+| `en-GB,nl;q=0.5`          | `en`                                |
+| `es-ES,es` of leeg        | `en`                                |
+
+Verschil met de projectkopieën (`request-language.server.ts`): die lazen enkel
+de eerste ingang, en een cookie met een onbekende taal gaf meteen de standaard.
+Hier valt zo'n cookie door naar Accept-Language.
+
+Losse bouwstenen: `ontleedAcceptLanguage(header)`, `pasTaal(waarde, talen)`,
+`normaliseerTaal(waarde, talen, standaard)` (vervangt `normalizeLanguage` met
+zijn `slice(0, 2)`) en `leesCookie(header, naam)`.
+
 ## mcp-bundel
 
 ⚠️ **Bouwtijd-module**, voor Node of Deno tijdens build, pre-commit-hook en CI.
@@ -567,6 +638,37 @@ Bot API, en Deno zet die URL in een fetch-foutmelding: `fout` is daarom altijd
 ontdaan van het token. Wat projectspecifiek is (welke beheerders, welke tabel,
 de logica van een bot) blijft in het project.
 
+## mail
+
+```ts
+import { sendMail } from "@holie/tools/mail";
+
+const r = await sendMail({
+  apiKey: process.env.RESEND_API_KEY!,
+  from: "ESE <noreply@ese-scissors.eu>",
+  to: "klant@example.com",
+  subject: "Bevestiging",
+  html,
+  text,
+  replyTo: "info@ese-scissors.eu",
+  idempotencyKey: `contact/${id}`,
+});
+if (!r.ok) throw new Error(r.fout); // { ok, id?, status, fout? }
+```
+
+Eén mail via de Resend-API, enkel met `fetch`. Ook `cc` en `bcc`; `to`, `cc`,
+`bcc` en `replyTo` nemen een adres of een rij.
+
+- Gooit niet: `ok`, `status` (0 bij geen antwoord of foute invoer), `id` van
+  Resend, `fout`. Lege sleutel, afzender, ontvanger of onderwerp geeft een reden
+  zonder verzoek.
+- Timeout standaard 10 s (`timeoutMs`), annuleren via `signal`.
+
+**Privacy en sleutels.** Zoals `./telegram`: geen omgevingsvariabelen, niets
+gelogd, en `fout` is altijd ontdaan van de sleutel. Het project kiest zelf
+sleutel en afzender: een Resend-sleutel is aan zijn eigen geverifieerde domein
+gebonden, en een gekruiste sleutel geeft een 403.
+
 ## Ontwikkelen
 
 ```bash
@@ -583,6 +685,15 @@ stonden, hield dat staande na een `git stash`-controle (die beide keren
 hetzelfde foute commando gebruikte) en gaf het door als openstaand punt. De
 CI-workflows draaien wél met die vlaggen, dus daar stonden ze groen - een
 verschil dat je pas ziet als je de twee naast elkaar legt.
+
+⚠️ **Echte AI-sleutels in je omgeving breken `ai_test.ts`.** Die tests gaan
+ervan uit dat er geen `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`
+of `META_MODEL_API_KEY` gezet is. Op een machine waar die als systeemvariabele
+staan, falen er 12 (gemeten 28-10-2026, ook vóór 0.16.0). Draai lokaal zo:
+
+```bash
+env -u GEMINI_API_KEY -u LOVABLE_API_KEY -u DEEPSEEK_API_KEY -u ANTHROPIC_API_KEY -u META_MODEL_API_KEY deno task test
+```
 
 ⚠️ **`deno fmt` vóór je een versietag zet.** `publish.yml` draait
 `deno fmt --check` en weigert anders te publiceren. Een tag verplaatsen kan niet

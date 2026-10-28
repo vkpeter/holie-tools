@@ -678,14 +678,65 @@ export function heeftBeeldInSysteem(messages: unknown[]): boolean {
   });
 }
 
-function leesSleutel(naam: AiProvider, opties: AiOpties): string | undefined {
-  const opgegeven = opties.sleutels?.[naam];
-  if (opgegeven) return opgegeven;
+/**
+ * Leest een omgevingsvariabele, runtime-neutraal: eerst `Deno.env` (Deno, Supabase edge
+ * functions), dan `process.env` (Node, Cloudflare Workers met `nodejs_compat`). Ontbreekt
+ * de runtime of de leesrechten, dan `undefined`. Een lege waarde telt als geen waarde.
+ */
+function leesEnv(naam: string): string | undefined {
+  const g = globalThis as {
+    Deno?: { env?: { get(n: string): string | undefined } };
+    process?: { env?: Record<string, string | undefined> };
+  };
   try {
-    return Deno.env.get(SLEUTEL_VAR[naam]) || undefined;
+    const waarde = g.Deno?.env?.get(naam);
+    if (waarde) return waarde;
+  } catch {
+    // Deno zonder --allow-env: probeer process.env, anders niets.
+  }
+  try {
+    return g.process?.env?.[naam] || undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * De AI-sleutels uit de omgeving (`GEMINI_API_KEY`, `LOVABLE_API_KEY`, `DEEPSEEK_API_KEY`,
+ * `ANTHROPIC_API_KEY`, `META_MODEL_API_KEY`), zowel in Deno als in Workers en Node.
+ * `callAi`, `transcribeerAudio` en `genereerBeeld` lezen ze sinds 0.16.0 zelf zo; deze
+ * functie is er voor wie vooraf wil toetsen of er een sleutel is (zie `heeftAiSleutel`).
+ */
+export function aiSleutels(): Partial<Record<AiProvider, string>> {
+  const uit: Partial<Record<AiProvider, string>> = {};
+  for (const naam of Object.keys(SLEUTEL_VAR) as AiProvider[]) {
+    const waarde = leesEnv(SLEUTEL_VAR[naam]);
+    if (waarde) uit[naam] = waarde;
+  }
+  return uit;
+}
+
+/** De providers van de standaardketen van `callAi`. */
+export const TEKST_PROVIDERS: AiProvider[] = [
+  "deepseek",
+  "gemini",
+  "anthropic",
+  "lovable",
+];
+
+/**
+ * Is er minstens één sleutel voor een van `providers` (standaard de tekstketen, zonder
+ * `meta`)? Zonder `sleutels` leest ze de omgeving via `aiSleutels()`.
+ */
+export function heeftAiSleutel(
+  sleutels: Partial<Record<AiProvider, string>> = aiSleutels(),
+  providers: readonly AiProvider[] = TEKST_PROVIDERS,
+): boolean {
+  return providers.some((p) => !!sleutels[p]);
+}
+
+function leesSleutel(naam: AiProvider, opties: AiOpties): string | undefined {
+  return opties.sleutels?.[naam] || leesEnv(SLEUTEL_VAR[naam]);
 }
 
 async function roep(
@@ -744,7 +795,7 @@ export async function callAi(
     // Sinds 0.15.0 staat Claude Haiku 5.5 tussen gemini en Lovable: het
     // maandelijkse API-tegoed van Claude Max vervalt anders ongebruikt (Peter,
     // 16-10-2026). Zonder `ANTHROPIC_API_KEY` wordt hij overgeslagen.
-    volgorde = ["deepseek", "gemini", "anthropic", "lovable"],
+    volgorde = TEKST_PROVIDERS,
     pogingen = 1,
   } = opties;
 
