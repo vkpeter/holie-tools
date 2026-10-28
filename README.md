@@ -4,6 +4,9 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.18.0 ook `./formulier` en `./codes`: zie
+[de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
 ## ai
 
 Een kleine providerketen voor chat-completions, voor Deno en Supabase Edge
@@ -104,6 +107,195 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
+
+## Nieuw in 0.18.0: formulieren en bots, de lat N1-N7/T1-T7
+
+Op 27-28 okt 2026 trok Peter de nieuwsbrieven, formulieren en Telegram-bots van
+zeven sites op dezelfde lat: holie, Eendje, Phyllox, Eagle-Eye, Billara, Foodie
+en ESE. Elke site bouwde de stukken apart. Hier staat per stuk de sterkste
+versie, in twee nieuwe ingangen (`./formulier`, `./codes`) en een uitbreiding
+van `./telegram`.
+
+⚠️ **Bump vereist.** `^0.17` sluit 0.18 uit: zet de import op
+`@holie/tools@^0.18`.
+
+### Formulieren en bots: de lat N1-N7/T1-T7
+
+| regel | wat                                                               | helper                                                   |
+| ----- | ----------------------------------------------------------------- | -------------------------------------------------------- |
+| N1    | anon en authenticated schrijven niet in formuliertabellen         | (SQL per site: policies weg, `revoke`)                   |
+| N2    | dubbele opt-in: bevestigen via een eenmalige code, enkel hash     | `maakCode`, `hashCode`                                   |
+| N3    | atomaire limiet per IP en per adres, dicht vallen                 | `klantIp`, `limietHit`, `RATE_LIMIT_HIT_SQL`             |
+| N4    | geen lidmaatschapsorakel: zelfde antwoord, zelfde duur            | `metVasteDuur`                                           |
+| N5    | lengte vóór de regex, lineaire regex, dan lower/trim              | `normaliseerEmail`, `isGeldigEmail`                      |
+| N6    | uitschrijfcode per lijst en adres, vaste lengte                   | `maakUitschrijfcode`, `controleerUitschrijfcode`         |
+| N7    | bevestigingsmail zonder vrije invoer (geen naam, geen kopie)      | (tekst per site), `escapeHtml` als er toch iets in moet  |
+| T1    | webhook enkel met het geheim                                      | `controleerWebhookGeheim`, `leidWebhookGeheimAf`         |
+| T2    | koppelen met een eenmalige code, kort geldig, enkel de hash       | `maakKorteCode`, `leesKorteCode`, `startParameter`       |
+| T3    | enkel privéchat, rechten op `from.id === chat.id`                 | `priveAfzender`, `isPriveAfzender`                       |
+| T4    | ingrijpende actie pas na een bevestigknop                         | `maakBevestigKnop`, `leesBevestigKnop`                   |
+| T5    | een doorgestuurd bericht is nooit een commando                    | `isDoorgestuurd`                                         |
+| T6    | escapen: HTML met `escapeHtml`                                    | `escapeHtml`, (`escapeMarkdownV2`)                       |
+| T7    | een knop telt enkel als hij aangeboden was, van de juiste klikker | `knopWasAangeboden`, `priveAfzender`, `leesBevestigKnop` |
+
+### `./formulier`
+
+```ts
+import {
+  klantIp,
+  limietHit,
+  metVasteDuur,
+  normaliseerEmail,
+} from "jsr:@holie/tools@^0.18/formulier";
+
+// N3: IP-limiet vóór de body. Zonder cf-connecting-ip: dicht.
+const ip = klantIp(req, { ipv6Per64: true });
+if (!ip) return new Response("Niet beschikbaar", { status: 503 });
+if (
+  !await limietHit(admin, {
+    sleutel: ip,
+    eindpunt: "nieuwsbrief:ip",
+    max: 10,
+    vensterMinuten: 60,
+  })
+) return new Response("Te veel aanvragen", { status: 429 });
+
+// N5: lengte, regex, lower.
+const email = normaliseerEmail(body.email);
+if (!email) return new Response("Ongeldig e-mailadres", { status: 400 });
+
+// N4: elk geldig adres krijgt hetzelfde antwoord na minstens 3,5 s.
+return await metVasteDuur(3500, async () => {
+  if (
+    await limietHit(admin, {
+      sleutel: email,
+      eindpunt: "nieuwsbrief:adres",
+      max: 3,
+      vensterMinuten: 24 * 60,
+    })
+  ) {
+    // rij zetten; de mail pas na het antwoord, met EdgeRuntime.waitUntil
+  }
+  return Response.json({ status: "ok" });
+});
+```
+
+- **`klantIp`** leest enkel `cf-connecting-ip`, nooit `X-Forwarded-For`: die zet
+  de client zelf. Het resultaat is canoniek, IPv4 in IPv6-vorm wordt IPv4. Met
+  `ipv6Per64` telt een IPv6-adres als zijn /64-blok, in dezelfde tekst als
+  Postgres `network(set_masklen(ip, 64))` (Eendje). Zonder of met een ongeldige
+  kop: `null`. Twee valkuilen: Cloudflare "Pseudo IPv4: Overwrite Headers" moet
+  uit staan, en een Worker die zelf een Supabase-functie aanroept stuurt zijn
+  eigen IP mee (tel dan in de Worker).
+- **`limietHit`** valt dicht: databankfout, gooien, `data` die niet exact `true`
+  is, een lege sleutel of ongeldige opties geven `false`. De sleutel gaat
+  standaard als SHA-256 naar de databank. Dat is een pseudoniem: alle
+  IPv4-adressen zijn na te rekenen. Met `peper` (eigen env-var, minstens 32
+  tekens) wordt het een HMAC. `versluier: false` bewaart de sleutel leesbaar.
+- **`RATE_LIMIT_HIT_SQL`** (ook als `sql/rate_limit_hit.sql`) is de migratie
+  erachter, letterlijk over te nemen. Tabel `rate_limit_hits` met de kolommen
+  van Foodie (`sleutel`, `endpoint`): de naam `rate_limits` is in holie, ESE en
+  Eagle-Eye al bezet met andere kolommen. Advisory lock per eindpunt en sleutel.
+  Opkuis in de functie zelf: hoogstens 500 rijen ouder dan 25 uur per hit, met
+  `skip locked`, dus geen pg_cron en geen wachtrij na een piek.
+  `security
+  definer` met lege `search_path`, enkel `service_role`. Venster 1
+  tot 1500 minuten.
+- **`normaliseerEmail`**: eerst de lengte (≤ 254), dan `EMAIL_PATROON`, dan
+  kleine letters. Het patroon is dat van holie plus de uitsluitingen van Eendje
+  (`<>"(),;:\[]`), zonder stuurtekens en onzichtbare tekens (zero-width space),
+  zonder dubbele punt in het lokale deel en met een domein in ASCII (punycode).
+  Lineair: 20.000 punten zijn in milliseconden afgewezen. De apostrof en
+  accenten in het lokale deel mogen (`o'neil@...`, `josé@...`).
+- **`metVasteDuur`** helpt enkel als het werk binnen de minimumduur blijft:
+  verstuur een mail na het antwoord, niet erbinnen.
+
+### `./codes`
+
+```ts
+import {
+  controleerUitschrijfcode,
+  hashCode,
+  maakCode,
+  maakKorteCode,
+  maakUitschrijfcode,
+} from "jsr:@holie/tools@^0.18/codes";
+
+// N2: de code gaat in de link, enkel de hash in de databank.
+const { code, hash } = await maakCode(); // 43 tekens, 256 bits
+// bij de klik: .eq("confirm_token_hash", await hashCode(code))
+
+// T2: korte koppelcode, met peper (40 bits zijn anders offline na te rekenen).
+const peper = Deno.env.get("CODE_PEPER")!; // minstens 32 tekens
+const kort = await maakKorteCode({ peper }); // bij /start: hashCode(leesKorteCode(x)!, peper)
+
+// N6: geen opslag nodig, de lijst zit in de code.
+const geheim = Deno.env.get("UNSUBSCRIBE_SECRET")!; // minstens 32 tekens
+const uit = await maakUitschrijfcode(geheim, "nieuwsbrief", email);
+const ok = await controleerUitschrijfcode(geheim, "nieuwsbrief", email, invoer);
+```
+
+- Een uitschrijfcode is altijd 43 tekens (HMAC-SHA256 als base64url, over
+  `lijst:adres` met het adres in kleine letters). Een afgeknipte, verlengde of
+  andere code faalt vóór de vergelijking, die in constante tijd loopt. Een link
+  van de lijst `herinneringen` schrijft niemand uit voor `nieuwsbrief` (Foodie).
+  Gebruik er een eigen geheim voor, niet dat van de bevestigknop.
+- `maakKorteCode` geeft 8 tekens zonder 0/O/1/I om over te typen (Telegram-
+  koppelcode van Eagle-Eye, 40 bits). Enkel veilig met een korte geldigheid,
+  eenmalig gebruik (`delete ... returning`), `limietHit` op de pogingen en een
+  `peper`: de pogingslimiet geldt niet voor wie de tabel leest.
+
+### `./telegram`: poort en bevestigknop
+
+```ts
+import {
+  isDoorgestuurd,
+  knopWasAangeboden,
+  leesBevestigKnop,
+  maakBevestigKnop,
+  priveAfzender,
+} from "jsr:@holie/tools@^0.18/telegram";
+
+const van = priveAfzender(update); // T3: null in een groep of van een ander
+if (van === null) return new Response("ok"); // stil negeren
+
+// T4: eerst vragen, met een knop die na 10 minuten vervalt.
+const ja = await maakBevestigKnop({
+  actie: "wis_ja",
+  id: artikel.id,
+  chatId: van,
+  geheim,
+});
+
+// T7: bij de klik.
+const cq = update.callback_query;
+if (cq && knopWasAangeboden(cq)) {
+  const knop = await leesBevestigKnop(cq.data, { geheim, chatId: van });
+  if (knop.ok && knop.actie === "wis_ja") {
+    // atomisch claimen: update ... where status = 'open' returning
+  }
+}
+```
+
+- **`priveAfzender(update)`** eist `chat.type === "private"`, een mens als
+  afzender en `from.id === chat.id`, voor `message`, `edited_message` en
+  `callback_query`. Een klik op een inline-bericht zonder chat telt niet.
+- **`maakBevestigKnop`** maakt `actie:id:vervaltijd:handtekening`. De HMAC (48
+  bits) bindt actie, id, vervaltijd en chat: geen verzonnen knop, geen verlengde
+  knop, geen knop uit een andere chat. Billara bewaarde de vervaltijd in een
+  tabel, Eendje en Foodie hadden er geen. Geldig 10 minuten, hoogstens 7 dagen.
+  Past altijd in 64 bytes of gooit: met een uuid als id mag de actie 10 tekens
+  zijn. Het geheim is een eigen env-var of
+  `leidWebhookGeheimAf(token, "telegram-knop")`.
+- **`leesBevestigKnop`** controleert vorm, dan handtekening, dan vervaltijd, en
+  geeft `{ ok: false, reden }` met `vorm`, `handtekening` of `verlopen`. De knop
+  bewijst de bedoeling, niet het eenmalig gebruik: claim de actie atomisch.
+- **`isDoorgestuurd`** kent `forward_origin` en de oude velden. Gekopieerde
+  tekst herkent niemand, dus een delete vraagt altijd een knop.
+- **`startParameter`** leest `/start <parameter>` (max 64, `A-Z a-z 0-9 _ -`).
+- **`escapeMarkdownV2`** bestaat voor bots die al op MarkdownV2 draaien. Het
+  advies blijft `parseMode: "HTML"` met `escapeHtml`: één vergeten teken in
+  MarkdownV2 laat het hele bericht weigeren.
 
 ## Nieuw in 0.17.0: de hele Bot-API, `./ics` en `claimMetVenster`
 

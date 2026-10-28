@@ -610,3 +610,320 @@ export async function leidWebhookGeheimAf(
     "",
   );
 }
+
+// ───────────── Poort: wie mag de bot iets laten doen (T3, T5, T7) ─────────────
+//
+// Uit Billara (`telegram-poll/validatie.ts`) en Eagle-Eye (`telegram-poort.ts`),
+// 28 okt 2026. Pure functies, geen netwerk.
+
+type TgId = number | string;
+type TgChat = { id?: TgId; type?: string } | null | undefined;
+type TgAfzender = { id?: TgId; is_bot?: boolean } | null | undefined;
+type TgBericht =
+  | {
+    chat?: TgChat;
+    from?: TgAfzender;
+    [veld: string]: unknown;
+  }
+  | null
+  | undefined;
+
+/** Het stuk van een Telegram-update dat de poort leest. */
+export interface TelegramUpdateLicht {
+  message?: TgBericht;
+  edited_message?: TgBericht;
+  callback_query?: {
+    from?: TgAfzender;
+    message?: TgBericht;
+    data?: unknown;
+  } | null;
+  [veld: string]: unknown;
+}
+
+/**
+ * Het Telegram-id van de afzender, enkel als die een mens is in zijn eigen
+ * privéchat met de bot; anders `null`. Geldt voor `message`, `edited_message`
+ * en `callback_query`. Elke andere soort update (kanaal, inline, groepslid)
+ * geeft `null`.
+ *
+ * Waarom beide eisen: in een groep is `chat.id` de groep, niet de persoon. Wie
+ * rechten op `chat.id` geeft, geeft ze aan elk groepslid, en die kan ook op de
+ * knoppen van een ander tikken. In een privéchat is `from.id` gelijk aan
+ * `chat.id`, dus bestaande koppelingen op `chat.id` blijven gelden.
+ */
+export function priveAfzender(
+  update: TelegramUpdateLicht | null | undefined,
+): number | null {
+  let chat: TgChat;
+  let van: TgAfzender;
+  if (update?.callback_query) {
+    van = update.callback_query.from;
+    // Een klik op een inline-bericht (zonder `message`) heeft geen chat: nee.
+    chat = update.callback_query.message?.chat;
+  } else {
+    const bericht = update?.message ?? update?.edited_message;
+    van = bericht?.from;
+    chat = bericht?.chat;
+  }
+  if (!chat || chat.type !== "private") return null;
+  if (!van || van.is_bot === true) return null;
+  if (van.id == null || chat.id == null) return null;
+  const vanId = Number(van.id);
+  const chatId = Number(chat.id);
+  // Een mens heeft een positief id; "" of 0 is geen afzender.
+  if (!Number.isSafeInteger(vanId) || vanId <= 0) return null;
+  return vanId === chatId ? vanId : null;
+}
+
+/** Komt deze update van een mens in zijn eigen privéchat? Zie `priveAfzender`. */
+export function isPriveAfzender(
+  update: TelegramUpdateLicht | null | undefined,
+): boolean {
+  return priveAfzender(update) !== null;
+}
+
+/**
+ * Is dit bericht doorgestuurd? De tekst komt dan van iemand anders, dus nooit
+ * een commando of een opdracht aan een model (Eendje F8, 28 okt 2026: een
+ * doorgestuurde tekst kon een delete uitlokken). Kent `forward_origin` (Bot API
+ * 7.0) en de oudere velden.
+ *
+ * ⚠️ Gekopieerde en geplakte tekst is niet te herkennen. Een ingrijpende actie
+ * vraagt daarom altijd een bevestigknop (`maakBevestigKnop`), ook bij een eigen
+ * bericht.
+ */
+export function isDoorgestuurd(bericht: unknown): boolean {
+  if (!bericht || typeof bericht !== "object") return false;
+  const b = bericht as Record<string, unknown>;
+  return b.forward_origin != null || b.forward_from != null ||
+    b.forward_from_chat != null || b.forward_sender_name != null ||
+    b.forward_date != null || b.is_automatic_forward === true;
+}
+
+/**
+ * Stond de aangeklikte `callback_data` echt als knop onder het bericht? Telegram
+ * stuurt de huidige knoppen van het bericht mee; een eigen client kan wel
+ * willekeurige data sturen, maar niet de knoppen van het bericht veranderen.
+ * Uit Eagle-Eye (`knopWasAangeboden`).
+ */
+export function knopWasAangeboden(
+  klik:
+    | {
+      data?: unknown;
+      message?: {
+        reply_markup?: {
+          inline_keyboard?: {
+            callback_data?: string;
+            [veld: string]: unknown;
+          }[][];
+        };
+      } | null;
+    }
+    | null
+    | undefined,
+): boolean {
+  const data = typeof klik?.data === "string" ? klik.data : "";
+  if (!data) return false;
+  const rijen = klik?.message?.reply_markup?.inline_keyboard;
+  if (!Array.isArray(rijen)) return false;
+  return rijen.some((rij) =>
+    Array.isArray(rij) && rij.some((k) => k?.callback_data === data)
+  );
+}
+
+/**
+ * De parameter uit `/start <parameter>` (deeplink `t.me/<bot>?start=...`), of
+ * `null`. Telegram laat daarin enkel `A-Z a-z 0-9 _ -` toe, hoogstens 64
+ * tekens; al de rest is geen geldige deeplink. Kent ook `/start@NaamBot
+ * <parameter>`. Uit Billara (`startToken`).
+ */
+export function startParameter(tekst: unknown): string | null {
+  if (typeof tekst !== "string" || tekst.length > 200) return null;
+  const m = /^\/start(?:@\w+)?\s+([A-Za-z0-9_-]{1,64})\s*$/.exec(tekst.trim());
+  return m ? m[1] : null;
+}
+
+// ───────────── Bevestigknop (T4, T7) ─────────────
+
+/** Standaardgeldigheid van een bevestigknop: 10 minuten, zoals bij Billara. */
+export const BEVESTIG_GELDIG_MS = 10 * 60 * 1000;
+
+/** Langste geldigheid van een bevestigknop: 7 dagen. */
+export const BEVESTIG_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+const ACTIE_PATROON = /^[a-z][a-z0-9_]{0,15}$/;
+const KNOP_ID_PATROON = /^[A-Za-z0-9_-]{1,40}$/;
+const VERVAL_PATROON = /^[0-9a-z]{1,9}$/;
+const KNOP_HANDTEKENING_PATROON = /^[A-Za-z0-9_-]{8}$/;
+
+/** Opties voor `maakBevestigKnop`. */
+export interface BevestigKnopOpties {
+  /** Wat de knop doet: `wis_ja`, `bel_nee`, ... (`a-z 0-9 _`, max 16, begint met een letter). */
+  actie: string;
+  /** Waarop: een uuid, een getal, ... (`A-Z a-z 0-9 _ -`, max 40). */
+  id: string;
+  /** Voor wie: het Telegram-id van de afzender (`priveAfzender`). */
+  chatId: TgId;
+  /** Geheim van minstens 32 tekens: een eigen env-var, of `leidWebhookGeheimAf(token, "telegram-knop")`. */
+  geheim: string;
+  /** Geldigheid in ms, hoogstens `BEVESTIG_MAX_MS`. Standaard `BEVESTIG_GELDIG_MS`. */
+  geldigMs?: number;
+  /** Te vervangen in tests. */
+  nu?: Date | number;
+}
+
+/** Uitkomst van `leesBevestigKnop`. */
+export type BevestigKnopUitkomst =
+  | { ok: true; actie: string; id: string; vervaltOp: Date }
+  | { ok: false; reden: "vorm" | "handtekening" | "verlopen" };
+
+async function knopHandtekening(
+  geheim: string,
+  chatId: number,
+  actie: string,
+  id: string,
+  verval: string,
+): Promise<string> {
+  const enc = new TextEncoder();
+  const sleutel = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(geheim),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      sleutel,
+      enc.encode(`telegram-knop:${chatId}:${actie}:${id}:${verval}`),
+    ),
+  );
+  let binair = "";
+  for (const b of mac.subarray(0, 6)) binair += String.fromCharCode(b);
+  // 6 bytes = 48 bits = precies 8 tekens base64url, zonder opvulling.
+  return btoa(binair).replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function tijdstip(nu: Date | number | undefined): number {
+  return nu === undefined ? Date.now() : nu instanceof Date ? nu.getTime() : nu;
+}
+
+/**
+ * `callback_data` voor een knop die een ingrijpende actie bevestigt (wissen,
+ * bellen, een mailing versturen): `actie:id:vervaltijd:handtekening`.
+ *
+ * Sterker dan elk van de drie versies van 28 okt 2026: Billara bewaarde de
+ * vervaltijd in een tabel, Eendje en Foodie hadden geen vervaltijd en geen
+ * handtekening (`wis:ja:<id>`, `del_ja:<id>`). Hier zitten de vervaltijd en de
+ * chat in een HMAC van 48 bits: een eigen client kan geen knop verzinnen, een
+ * oude knop niet verlengen en een knop niet in een andere chat gebruiken.
+ *
+ * ⚠️ De knop bewijst de bedoeling, niet dat hij maar één keer gebruikt wordt.
+ * Claim de actie atomisch in de databank (`update ... where status = 'open'
+ * returning`), zoals Billara voor tickets en undo.
+ *
+ * Gooit als het resultaat niet binnen `TELEGRAM_MAX_CALLBACK_BYTES` past of een
+ * veld ongeldig is. Met een uuid als id blijven er 10 tekens over voor de actie.
+ */
+export async function maakBevestigKnop(
+  opties: BevestigKnopOpties,
+): Promise<string> {
+  const { actie, id, geheim } = opties;
+  if (typeof actie !== "string" || !ACTIE_PATROON.test(actie)) {
+    throw new Error(
+      "maakBevestigKnop: actie enkel a-z, 0-9 en _, max 16, begint met een letter",
+    );
+  }
+  if (typeof id !== "string" || !KNOP_ID_PATROON.test(id)) {
+    throw new Error("maakBevestigKnop: id enkel A-Z, a-z, 0-9, _ en -, max 40");
+  }
+  if (typeof geheim !== "string" || geheim.length < 32) {
+    throw new Error("maakBevestigKnop: geheim van minstens 32 tekens nodig");
+  }
+  const chatId = Number(opties.chatId);
+  if (opties.chatId == null || !Number.isSafeInteger(chatId)) {
+    throw new Error("maakBevestigKnop: chatId is geen Telegram-id");
+  }
+  const geldig = opties.geldigMs ?? BEVESTIG_GELDIG_MS;
+  if (!Number.isFinite(geldig) || geldig <= 0 || geldig > BEVESTIG_MAX_MS) {
+    throw new Error("maakBevestigKnop: geldigMs tussen 0 en 7 dagen");
+  }
+  const verval = Math.ceil((tijdstip(opties.nu) + geldig) / 1000).toString(36);
+  const sig = await knopHandtekening(geheim, chatId, actie, id, verval);
+  const data = `${actie}:${id}:${verval}:${sig}`;
+  if (!pastAlsCallbackData(data)) {
+    throw new Error(
+      `maakBevestigKnop: ${data.length} bytes, max ${TELEGRAM_MAX_CALLBACK_BYTES}; kort de actie of het id in`,
+    );
+  }
+  return data;
+}
+
+/**
+ * Leest en controleert de `callback_data` van `maakBevestigKnop`. Volgorde:
+ * eerst de vorm, dan de handtekening, dan de vervaltijd. Zo krijgt enkel een
+ * echte knop de melding "verlopen".
+ *
+ * `chatId` is de afzender van de klik (`priveAfzender(update)`), niet iets uit
+ * de data: een knop uit een andere chat faalt op de handtekening.
+ *
+ * Gooit nooit. Een ontbrekend of te kort geheim geeft `handtekening`.
+ */
+export async function leesBevestigKnop(
+  data: unknown,
+  opties: {
+    geheim: string | null | undefined;
+    chatId: TgId | null | undefined;
+    nu?: Date | number;
+  },
+): Promise<BevestigKnopUitkomst> {
+  if (typeof data !== "string" || !pastAlsCallbackData(data)) {
+    return { ok: false, reden: "vorm" };
+  }
+  const delen = data.split(":");
+  if (delen.length !== 4) return { ok: false, reden: "vorm" };
+  const [actie, id, verval, sig] = delen;
+  if (
+    !ACTIE_PATROON.test(actie) || !KNOP_ID_PATROON.test(id) ||
+    !VERVAL_PATROON.test(verval) || !KNOP_HANDTEKENING_PATROON.test(sig)
+  ) {
+    return { ok: false, reden: "vorm" };
+  }
+  const { geheim } = opties;
+  const chatId = Number(opties.chatId);
+  if (
+    typeof geheim !== "string" || geheim.length < 32 ||
+    opties.chatId == null || !Number.isSafeInteger(chatId)
+  ) {
+    return { ok: false, reden: "handtekening" };
+  }
+  let verwacht: string;
+  try {
+    verwacht = await knopHandtekening(geheim, chatId, actie, id, verval);
+  } catch {
+    return { ok: false, reden: "handtekening" };
+  }
+  if (!gelijkeTekst(verwacht, sig)) return { ok: false, reden: "handtekening" };
+  const vervaltOp = new Date(parseInt(verval, 36) * 1000);
+  if (vervaltOp.getTime() <= tijdstip(opties.nu)) {
+    return { ok: false, reden: "verlopen" };
+  }
+  return { ok: true, actie, id, vervaltOp };
+}
+
+// ───────────── MarkdownV2 (T6) ─────────────
+
+/**
+ * Escapet tekst voor `parse_mode: "MarkdownV2"`: elk teken dat de Bot API daar
+ * als opmaak leest krijgt een backslash, de backslash zelf ook.
+ *
+ * Het advies blijft HTML met `escapeHtml`: één vergeten teken in MarkdownV2
+ * laat het hele bericht weigeren ("can't parse entities"), en die lijst is
+ * lang. Deze functie is er voor bots die al op MarkdownV2 draaien. Niet voor de
+ * oude modus `"Markdown"`, die een andere set kent. Binnen `code` en `pre`
+ * gelden andere regels; daar volstaat dit niet.
+ */
+export function escapeMarkdownV2(tekst: string): string {
+  return tekst.replace(/[_*\[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
+}

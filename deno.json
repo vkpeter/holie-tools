@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -11,7 +11,9 @@
     "./html": "./html.ts",
     "./runslot": "./runslot.ts",
     "./mail": "./mail.ts",
-    "./ics": "./ics.ts"
+    "./ics": "./ics.ts",
+    "./formulier": "./formulier.ts",
+    "./codes": "./codes.ts"
   },
   "publish": {
     "include": [
@@ -24,6 +26,9 @@
       "runslot.ts",
       "mail.ts",
       "ics.ts",
+      "formulier.ts",
+      "codes.ts",
+      "sql/rate_limit_hit.sql",
       "README.md",
       "LICENSE"
     ]
