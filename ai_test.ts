@@ -25,6 +25,44 @@ import {
   VIDEO_FORMATEN,
 } from "./ai.ts";
 
+/** De omgevingsvariabelen waarop `ai.ts` terugvalt als `sleutels` een provider mist. */
+const AI_VARS = [
+  "GEMINI_API_KEY",
+  "LOVABLE_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "META_MODEL_API_KEY",
+];
+
+/**
+ * `Deno.test`, maar los van de machine: de AI-sleutels uit de omgeving zijn weg
+ * tijdens de test en komen daarna terug, en een `fetch` die geen test vervangt,
+ * faalt meteen. Zo is de uitkomst dezelfde op een laptop met echte sleutels als
+ * in CI, en gaat er nooit een echte call naar een provider.
+ *
+ * Bewust `test` en geen Nederlandse naam: `deno fmt` houdt de kop van een test
+ * enkel op één regel voor namen die het als testaanroep kent.
+ */
+function test(naam: string, fn: () => void | Promise<void>) {
+  Deno.test(naam, async () => {
+    const bewaard = AI_VARS.map((v) => [v, Deno.env.get(v)] as const);
+    for (const v of AI_VARS) Deno.env.delete(v);
+    const echteFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string) =>
+      Promise.reject(
+        new Error(`echte fetch in een test: ${url}`),
+      )) as typeof fetch;
+    try {
+      await fn();
+    } finally {
+      globalThis.fetch = echteFetch;
+      for (const [v, w] of bewaard) {
+        if (w !== undefined) Deno.env.set(v, w);
+      }
+    }
+  });
+}
+
 type Antwoord = {
   status?: number;
   content?: string;
@@ -64,7 +102,7 @@ function metAntwoorden(...antwoorden: Antwoord[]) {
   return { aanroepen, herstel: () => (globalThis.fetch = origineel) };
 }
 
-Deno.test("probeert standaard DeepSeek, dan gratis gemini, dan Lovable", async () => {
+test("probeert standaard DeepSeek, dan gratis gemini, dan Lovable", async () => {
   // Sinds 19-09-2026 staat de standaardvolgorde op goedkoop-eerst: DeepSeek is
   // spotgoedkoop en heeft geen dagplafond, gemini is gratis maar wel geplafonneerd,
   // Lovable is het betalende vangnet.
@@ -78,7 +116,7 @@ Deno.test("probeert standaard DeepSeek, dan gratis gemini, dan Lovable", async (
   }
 });
 
-Deno.test("gemini staat tussen DeepSeek en Lovable in", async () => {
+test("gemini staat tussen DeepSeek en Lovable in", async () => {
   const f = metAntwoorden(
     { status: 500, content: "" },
     { content: "van gemini" },
@@ -93,7 +131,7 @@ Deno.test("gemini staat tussen DeepSeek en Lovable in", async () => {
   }
 });
 
-Deno.test("stuurt het DeepSeek-only thinking-veld nooit naar gemini", async () => {
+test("stuurt het DeepSeek-only thinking-veld nooit naar gemini", async () => {
   // ☠️ Google geeft HTTP 400 "Unknown name: thinking" en dat is een 4xx: de keten
   // herkanst niet. Zou dat veld in de gedeelde body staan, dan faalde elke
   // tekst-call op de gratis route. Gemeten 19-09-2026.
@@ -110,7 +148,7 @@ Deno.test("stuurt het DeepSeek-only thinking-veld nooit naar gemini", async () =
   }
 });
 
-Deno.test("herkanst niet op een 429 van de gratis route", async () => {
+test("herkanst niet op een 429 van de gratis route", async () => {
   // Een leeg dagquotum is morgen pas over: doorvallen, niet herkansen.
   // Alles faalt behalve de laatste provider: gemini krijgt een 429 en mag die
   // NIET herkansen, ook al staat `pogingen` op 2.
@@ -136,7 +174,7 @@ Deno.test("herkanst niet op een 429 van de gratis route", async () => {
   }
 });
 
-Deno.test("zet het denkwerk van DeepSeek standaard uit", async () => {
+test("zet het denkwerk van DeepSeek standaard uit", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await callAi(vraag, { label: "t", sleutels, volgorde: ["deepseek"] });
@@ -147,7 +185,7 @@ Deno.test("zet het denkwerk van DeepSeek standaard uit", async () => {
   }
 });
 
-Deno.test("laat DeepSeek nadenken als dat gevraagd wordt", async () => {
+test("laat DeepSeek nadenken als dat gevraagd wordt", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await callAi(vraag, {
@@ -162,7 +200,7 @@ Deno.test("laat DeepSeek nadenken als dat gevraagd wordt", async () => {
   }
 });
 
-Deno.test("valt door bij een afgekapt antwoord", async () => {
+test("valt door bij een afgekapt antwoord", async () => {
   const f = metAntwoorden({ content: '{"half', finish: "length" }, {
     content: '{"heel":1}',
   });
@@ -179,7 +217,7 @@ Deno.test("valt door bij een afgekapt antwoord", async () => {
   }
 });
 
-Deno.test("geeft een afgekapt antwoord toch terug als er geen volgende provider is", async () => {
+test("geeft een afgekapt antwoord toch terug als er geen volgende provider is", async () => {
   const f = metAntwoorden({ content: "half", finish: "length" });
   try {
     const r = await callAi(vraag, {
@@ -194,7 +232,7 @@ Deno.test("geeft een afgekapt antwoord toch terug als er geen volgende provider 
   }
 });
 
-Deno.test("valt door bij een afgekeurd antwoord, zonder het te herhalen", async () => {
+test("valt door bij een afgekeurd antwoord, zonder het te herhalen", async () => {
   const f = metAntwoorden({ content: "Sorry" }, { content: "Kipfilet" });
   try {
     const r = await callAi(vraag, {
@@ -211,7 +249,7 @@ Deno.test("valt door bij een afgekeurd antwoord, zonder het te herhalen", async 
   }
 });
 
-Deno.test("herkanst bij een 5xx, niet bij een andere 4xx", async () => {
+test("herkanst bij een 5xx, niet bij een andere 4xx", async () => {
   const f = metAntwoorden({ status: 503 }, { content: "ok" });
   try {
     const r = await callAi(vraag, {
@@ -242,7 +280,7 @@ Deno.test("herkanst bij een 5xx, niet bij een andere 4xx", async () => {
   }
 });
 
-Deno.test("stuurt tools enkel naar de gevraagde providers", async () => {
+test("stuurt tools enkel naar de gevraagde providers", async () => {
   const f = metAntwoorden({ status: 500 }, { content: "tekst" });
   const tools = [{ type: "function", function: { name: "x" } }];
   try {
@@ -261,7 +299,7 @@ Deno.test("stuurt tools enkel naar de gevraagde providers", async () => {
   }
 });
 
-Deno.test("geeft tool calls terug", async () => {
+test("geeft tool calls terug", async () => {
   const f = metAntwoorden({
     toolCall: { function: { name: "x", arguments: "{}" } },
   });
@@ -279,7 +317,7 @@ Deno.test("geeft tool calls terug", async () => {
   }
 });
 
-Deno.test("stopt bij een Lovable-quotum als de aanroeper dat vraagt", async () => {
+test("stopt bij een Lovable-quotum als de aanroeper dat vraagt", async () => {
   const f = metAntwoorden({ status: 402 });
   try {
     const fout = await assertRejects(
@@ -299,7 +337,7 @@ Deno.test("stopt bij een Lovable-quotum als de aanroeper dat vraagt", async () =
   }
 });
 
-Deno.test("roept de hooks aan, en een falende hook breekt niets", async () => {
+test("roept de hooks aan, en een falende hook breekt niets", async () => {
   const f = metAntwoorden({ status: 500 }, { content: "ok" });
   const fouten: AiPoging[] = [];
   const successen: AiPoging[] = [];
@@ -324,7 +362,7 @@ Deno.test("roept de hooks aan, en een falende hook breekt niets", async () => {
   }
 });
 
-Deno.test("slaat DeepSeek over bij een beeld in een system-bericht", async () => {
+test("slaat DeepSeek over bij een beeld in een system-bericht", async () => {
   const f = metAntwoorden({ content: "ok" });
   const berichten = [{
     role: "system",
@@ -348,7 +386,7 @@ Deno.test("slaat DeepSeek over bij een beeld in een system-bericht", async () =>
   }
 });
 
-Deno.test("noemt de sleutels en de laatste fout als alles faalt", async () => {
+test("noemt de sleutels en de laatste fout als alles faalt", async () => {
   const f = metAntwoorden({ status: 401 });
   try {
     await assertRejects(
@@ -368,7 +406,7 @@ Deno.test("noemt de sleutels en de laatste fout als alles faalt", async () => {
 
 // ---- 0.2.0 ----
 
-Deno.test("stuurt max_tokens en temperature enkel mee als ze opgegeven zijn", async () => {
+test("stuurt max_tokens en temperature enkel mee als ze opgegeven zijn", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await callAi(vraag, { label: "t", sleutels });
@@ -391,7 +429,7 @@ Deno.test("stuurt max_tokens en temperature enkel mee als ze opgegeven zijn", as
   assertEquals(ds.thinking, { type: "disabled" });
 });
 
-Deno.test("stuurt response_format mee", async () => {
+test("stuurt response_format mee", async () => {
   const f = metAntwoorden({ content: "{}" });
   try {
     await callAi(vraag, {
@@ -406,7 +444,7 @@ Deno.test("stuurt response_format mee", async () => {
   }
 });
 
-Deno.test("herkanst bij een netwerkfout binnen dezelfde provider", async () => {
+test("herkanst bij een netwerkfout binnen dezelfde provider", async () => {
   const origineel = globalThis.fetch;
   const urls: string[] = [];
   let n = 0;
@@ -436,7 +474,7 @@ Deno.test("herkanst bij een netwerkfout binnen dezelfde provider", async () => {
   }
 });
 
-Deno.test("geeft de lengte van de inhoud mee aan bijSucces", async () => {
+test("geeft de lengte van de inhoud mee aan bijSucces", async () => {
   const f = metAntwoorden({ content: "hallo" });
   const gezien: AiPoging[] = [];
   try {
@@ -454,7 +492,7 @@ Deno.test("geeft de lengte van de inhoud mee aan bijSucces", async () => {
   }
 });
 
-Deno.test("herkanst een afgekeurd antwoord bij dezelfde provider als dat gevraagd wordt", async () => {
+test("herkanst een afgekeurd antwoord bij dezelfde provider als dat gevraagd wordt", async () => {
   const f = metAntwoorden({ content: "Sorry" }, { content: "goed" });
   try {
     const r = await callAi(vraag, {
@@ -474,7 +512,7 @@ Deno.test("herkanst een afgekeurd antwoord bij dezelfde provider als dat gevraag
   }
 });
 
-Deno.test("foutTekst: Error, PostgREST-fout, onbekend object, primitief", () => {
+test("foutTekst: Error, PostgREST-fout, onbekend object, primitief", () => {
   assertEquals(foutTekst(new Error("stuk")), "stuk");
   assertEquals(
     foutTekst({
@@ -494,7 +532,7 @@ Deno.test("foutTekst: Error, PostgREST-fout, onbekend object, primitief", () => 
   assertEquals(foutTekst(null), "null");
 });
 
-Deno.test("een hook die een niet-Error gooit, breekt niets", async () => {
+test("een hook die een niet-Error gooit, breekt niets", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await callAi(vraag, {
@@ -518,7 +556,7 @@ Deno.test("een hook die een niet-Error gooit, breekt niets", async () => {
 // dat het model niet kan lezen hier stukloopt in plaats van stil verzonnen te
 // worden.
 
-Deno.test("transcribeert via Lovable zonder gemini-sleutel", async () => {
+test("transcribeert via Lovable zonder gemini-sleutel", async () => {
   const f = metAntwoorden({ content: "twee sneden brood" });
   try {
     const r = await transcribeerAudio({
@@ -536,7 +574,7 @@ Deno.test("transcribeert via Lovable zonder gemini-sleutel", async () => {
   }
 });
 
-Deno.test("neemt de gratis Gemini-route vóór de betalende gateway", async () => {
+test("neemt de gratis Gemini-route vóór de betalende gateway", async () => {
   const f = metAntwoorden({ content: "twee sneden brood" });
   try {
     const r = await transcribeerAudio({
@@ -558,7 +596,7 @@ Deno.test("neemt de gratis Gemini-route vóór de betalende gateway", async () =
   }
 });
 
-Deno.test("valt bij een opgebruikt gratis quotum door naar Lovable", async () => {
+test("valt bij een opgebruikt gratis quotum door naar Lovable", async () => {
   // Een 429 op de gratis route is een leeg DAGquotum, niet een storing. Het
   // tweede gratis model deelt hetzelfde projectquotum, dus dat overslaan is het
   // punt: er hoort precies EEN gratis poging te zijn, en dan de betalende route.
@@ -583,7 +621,7 @@ Deno.test("valt bij een opgebruikt gratis quotum door naar Lovable", async () =>
   }
 });
 
-Deno.test("probeert bij een ingetrokken gratis model wél het volgende", async () => {
+test("probeert bij een ingetrokken gratis model wél het volgende", async () => {
   // Een 404 betekent dat DIT model weg is (zoals gemini-2.5-flash-lite op
   // 19-09-2026), niet dat het quotum op is: de terugval hoort dan gewoon te
   // draaien, nog steeds gratis, zonder naar de betalende route te springen.
@@ -606,7 +644,7 @@ Deno.test("probeert bij een ingetrokken gratis model wél het volgende", async (
   }
 });
 
-Deno.test("een afgedwongen model geldt voor elke provider", async () => {
+test("een afgedwongen model geldt voor elke provider", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await transcribeerAudio({
@@ -623,7 +661,7 @@ Deno.test("een afgedwongen model geldt voor elke provider", async () => {
   }
 });
 
-Deno.test("stuurt de audio als input_audio in een user-bericht", async () => {
+test("stuurt de audio als input_audio in een user-bericht", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await transcribeerAudio({
@@ -662,7 +700,7 @@ Deno.test("stuurt de audio als input_audio in een user-bericht", async () => {
 // ⚠️ 17-09-2026: video werd toegevoegd (mp4, mov), maar webm NIET - juist omdat
 // deze test bestaat. De meting hieronder ging over webm als `input_audio`; of webm
 // als video-deel wel deugt is nooit gemeten, dus blijft het geweigerd.
-Deno.test("weigert een formaat dat het model niet kan lezen", async () => {
+test("weigert een formaat dat het model niet kan lezen", async () => {
   const f = metAntwoorden({ content: "verzonnen lijstje" });
   try {
     await assertRejects(
@@ -681,7 +719,7 @@ Deno.test("weigert een formaat dat het model niet kan lezen", async () => {
   }
 });
 
-Deno.test("meldt AiOnbeschikbaar als de gateway blijft falen", async () => {
+test("meldt AiOnbeschikbaar als de gateway blijft falen", async () => {
   const f = metAntwoorden({ status: 500 });
   try {
     await assertRejects(
@@ -700,7 +738,7 @@ Deno.test("meldt AiOnbeschikbaar als de gateway blijft falen", async () => {
   }
 });
 
-Deno.test("slaat een provider zonder sleutel over", async () => {
+test("slaat een provider zonder sleutel over", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await assertRejects(
@@ -725,7 +763,7 @@ Deno.test("slaat een provider zonder sleutel over", async () => {
 // dezelfde gateway. Peter, 16-09-2026: 2.5-flash-lite als standaard (goedkoopst,
 // $0,30/M audio-in) met 3.1-flash-lite ($0,50) eronder.
 
-Deno.test("gebruikt standaard het goedkoopste audiomodel", async () => {
+test("gebruikt standaard het goedkoopste audiomodel", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await transcribeerAudio({
@@ -743,7 +781,7 @@ Deno.test("gebruikt standaard het goedkoopste audiomodel", async () => {
 
 // ☠️ De reden dat er een keten is: 2.5-flash-lite verloopt op 28-01-2027. Valt het
 // weg met een 4xx, dan moet spraak blijven werken op het volgende model.
-Deno.test("valt bij een 4xx door naar het volgende audiomodel", async () => {
+test("valt bij een 4xx door naar het volgende audiomodel", async () => {
   const f = metAntwoorden({ status: 404 }, { content: "twee sneden brood" });
   try {
     const r = await transcribeerAudio({
@@ -762,7 +800,7 @@ Deno.test("valt bij een 4xx door naar het volgende audiomodel", async () => {
   }
 });
 
-Deno.test("valt ook bij een 5xx door naar het volgende audiomodel", async () => {
+test("valt ook bij een 5xx door naar het volgende audiomodel", async () => {
   const f = metAntwoorden({ status: 500 }, { content: "ok" });
   try {
     const r = await transcribeerAudio({
@@ -777,7 +815,7 @@ Deno.test("valt ook bij een 5xx door naar het volgende audiomodel", async () => 
   }
 });
 
-Deno.test("een enkele model-string blijft werken", async () => {
+test("een enkele model-string blijft werken", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await transcribeerAudio({
@@ -794,7 +832,7 @@ Deno.test("een enkele model-string blijft werken", async () => {
   }
 });
 
-Deno.test("geeft op als elk audiomodel faalt", async () => {
+test("geeft op als elk audiomodel faalt", async () => {
   const f = metAntwoorden({ status: 500 });
   try {
     await assertRejects(
@@ -870,7 +908,7 @@ function metBeeld(
 const PNG_1X1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-Deno.test("genereert een beeld via Lovable met het beeldmodel", async () => {
+test("genereert een beeld via Lovable met het beeldmodel", async () => {
   const f = metBeeld({ dataUrl: PNG_1X1 });
   try {
     const r = await genereerBeeld({ label: "t", prompt: "een eend", sleutels });
@@ -885,7 +923,7 @@ Deno.test("genereert een beeld via Lovable met het beeldmodel", async () => {
   }
 });
 
-Deno.test("valt bij een foutstatus door naar het volgende model", async () => {
+test("valt bij een foutstatus door naar het volgende model", async () => {
   // Een foutstatus betekent dat de gateway niets gerenderd en dus niets
   // aangerekend heeft: het volgende model mag het proberen.
   const f = metBeeld({ status: 500 }, { dataUrl: PNG_1X1 });
@@ -899,7 +937,7 @@ Deno.test("valt bij een foutstatus door naar het volgende model", async () => {
   }
 });
 
-Deno.test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
+test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
   // Een beeld dat server-side al gerenderd is, is al aangerekend, ook als het
   // antwoord ons nooit bereikt. Een tweede poging betekent twee keer betalen.
   const f = metBeeld({ gooi: new Error("socket hang up") }, {
@@ -921,7 +959,7 @@ Deno.test("REGEL 1: herkanst NIET na een netwerkfout of timeout", async () => {
 const PNG_B64 = PNG_1X1.slice(PNG_1X1.indexOf(",") + 1);
 const sleutelsMetMeta = { ...sleutels, meta: "test-meta" };
 
-Deno.test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", async () => {
+test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", async () => {
   const f = metBeeld({ metaB64: PNG_B64 });
   try {
     const r = await genereerBeeld({
@@ -949,7 +987,7 @@ Deno.test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", 
   }
 });
 
-Deno.test("beeld: zonder Meta-sleutel loopt alles zoals voorheen over Lovable", async () => {
+test("beeld: zonder Meta-sleutel loopt alles zoals voorheen over Lovable", async () => {
   const f = metBeeld({ dataUrl: PNG_1X1 });
   try {
     const r = await genereerBeeld({
@@ -966,7 +1004,7 @@ Deno.test("beeld: zonder Meta-sleutel loopt alles zoals voorheen over Lovable", 
   }
 });
 
-Deno.test("beeld: een foutstatus bij Meta valt door naar Lovable", async () => {
+test("beeld: een foutstatus bij Meta valt door naar Lovable", async () => {
   const f = metBeeld({ status: 500 }, { dataUrl: PNG_1X1 });
   try {
     const r = await genereerBeeld({
@@ -982,7 +1020,7 @@ Deno.test("beeld: een foutstatus bij Meta valt door naar Lovable", async () => {
   }
 });
 
-Deno.test("beeld: REGEL 2 geldt per rekening, 402 bij Meta blokkeert Lovable niet", async () => {
+test("beeld: REGEL 2 geldt per rekening, 402 bij Meta blokkeert Lovable niet", async () => {
   const f = metBeeld({ status: 402 }, { dataUrl: PNG_1X1 });
   try {
     const r = await genereerBeeld({
@@ -997,7 +1035,7 @@ Deno.test("beeld: REGEL 2 geldt per rekening, 402 bij Meta blokkeert Lovable nie
   }
 });
 
-Deno.test("beeld: REGEL 2 bij de laatste provider geeft nog altijd een AiQuotumFout", async () => {
+test("beeld: REGEL 2 bij de laatste provider geeft nog altijd een AiQuotumFout", async () => {
   // Meta 500, daarna Lovable 402: geen tweede Lovable-model proberen.
   const f = metBeeld({ status: 500 }, { status: 402 }, { dataUrl: PNG_1X1 });
   try {
@@ -1012,7 +1050,7 @@ Deno.test("beeld: REGEL 2 bij de laatste provider geeft nog altijd een AiQuotumF
   }
 });
 
-Deno.test("beeld: een 200 van Meta zonder beeld valt door naar Lovable", async () => {
+test("beeld: een 200 van Meta zonder beeld valt door naar Lovable", async () => {
   const f = metBeeld({ metaLeeg: true }, { dataUrl: PNG_1X1 });
   try {
     const r = await genereerBeeld({
@@ -1026,7 +1064,7 @@ Deno.test("beeld: een 200 van Meta zonder beeld valt door naar Lovable", async (
   }
 });
 
-Deno.test("beeld: REGEL 1 geldt ook over providers, geen Lovable na een timeout bij Meta", async () => {
+test("beeld: REGEL 1 geldt ook over providers, geen Lovable na een timeout bij Meta", async () => {
   const f = metBeeld({ gooi: new Error("timeout") }, { dataUrl: PNG_1X1 });
   try {
     await assertRejects(
@@ -1040,7 +1078,7 @@ Deno.test("beeld: REGEL 1 geldt ook over providers, geen Lovable na een timeout 
   }
 });
 
-Deno.test("schatUsd: Muse Image kost een vast bedrag per beeld", () => {
+test("schatUsd: Muse Image kost een vast bedrag per beeld", () => {
   const r = schatUsd("muse-image-1.0", {
     input_tokens: 9831,
     output_tokens: 749,
@@ -1049,7 +1087,7 @@ Deno.test("schatUsd: Muse Image kost een vast bedrag per beeld", () => {
   assertEquals(r.geschat, false);
 });
 
-Deno.test("REGEL 2: valt bij 402 NIET door naar het volgende model", async () => {
+test("REGEL 2: valt bij 402 NIET door naar het volgende model", async () => {
   // 402 gaat over de rekening, niet over het model: doorvallen raakt dezelfde
   // muur nog een keer en maakt de fout onleesbaar.
   const f = metBeeld({ status: 402 }, { dataUrl: PNG_1X1 });
@@ -1064,7 +1102,7 @@ Deno.test("REGEL 2: valt bij 402 NIET door naar het volgende model", async () =>
   }
 });
 
-Deno.test("REGEL 2: doet hetzelfde bij 403 (creditlimiet workspace)", async () => {
+test("REGEL 2: doet hetzelfde bij 403 (creditlimiet workspace)", async () => {
   const f = metBeeld({ status: 403 }, { dataUrl: PNG_1X1 });
   try {
     await assertRejects(
@@ -1077,7 +1115,7 @@ Deno.test("REGEL 2: doet hetzelfde bij 403 (creditlimiet workspace)", async () =
   }
 });
 
-Deno.test("REGEL 3: tekst in plaats van beeld is een weigering", async () => {
+test("REGEL 3: tekst in plaats van beeld is een weigering", async () => {
   // Die poging IS aangerekend, en het is een inhoudelijke weigering: herkansen
   // bij hetzelfde model heeft geen zin.
   const f = metBeeld(
@@ -1096,7 +1134,7 @@ Deno.test("REGEL 3: tekst in plaats van beeld is een weigering", async () => {
   }
 });
 
-Deno.test("weigert een beeld dat boven maxBytes uitkomt", async () => {
+test("weigert een beeld dat boven maxBytes uitkomt", async () => {
   const f = metBeeld({ dataUrl: PNG_1X1 });
   try {
     await assertRejects(
@@ -1108,7 +1146,7 @@ Deno.test("weigert een beeld dat boven maxBytes uitkomt", async () => {
   }
 });
 
-Deno.test("de terugval kost evenveel als het eerste model", () => {
+test("de terugval kost evenveel als het eerste model", () => {
   // Springt de terugval in omdat het eerste model wegvalt, dan mag dat de kost
   // niet verdubbelen. Dit legt de afspraak vast, niet de prijs zelf: die staat
   // in het commentaar bij STANDAARD_MODELLEN met de meetdatum erbij.
@@ -1128,7 +1166,7 @@ Deno.test("de terugval kost evenveel als het eerste model", () => {
   );
 });
 
-Deno.test("domein stuurt de SYSTEEMPROMPT, niet de staart van de opdracht", async () => {
+test("domein stuurt de SYSTEEMPROMPT, niet de staart van de opdracht", async () => {
   // Zonder domeinhint kiest het model bij een kort los woord het akoestisch
   // dichtstbijzijnde: "draai" in plaats van "druiven" (gemeten 16-09-2026 in
   // Foodie, door Peter in de app getest). De hint hoort in de systeemrol, want
@@ -1167,7 +1205,7 @@ Deno.test("domein stuurt de SYSTEEMPROMPT, niet de staart van de opdracht", asyn
   }
 });
 
-Deno.test("de opdracht zegt wat te doen bij half verstaan en bij stilte", async () => {
+test("de opdracht zegt wat te doen bij half verstaan en bij stilte", async () => {
   // Concreet in plaats van verbiedend: een model dat alleen hoort wat het NIET
   // mag, kiest bij twijfel alsnog iets plausibels.
   const f = metAntwoorden({ content: "ok" });
@@ -1199,7 +1237,7 @@ Deno.test("de opdracht zegt wat te doen bij half verstaan en bij stilte", async 
   }
 });
 
-Deno.test("zonder domein blijft de standaard-systeemprompt staan", async () => {
+test("zonder domein blijft de standaard-systeemprompt staan", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await transcribeerAudio({
@@ -1225,7 +1263,7 @@ Deno.test("zonder domein blijft de standaard-systeemprompt staan", async () => {
   }
 });
 
-Deno.test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
+test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
   // Een ISO-code is geen instructie. En bij Nederlands is "Vlaams" preciezer dan
   // "Nederlands": de sprekers van deze apps zijn Vlaams, wat zowel de woordkeuze
   // (pistolet, frigo, croque) als de klankherkenning stuurt.
@@ -1242,7 +1280,7 @@ Deno.test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
 // verwacht daar een apart video-deel. Billara deed dit tot vandaag met een eigen
 // fetch omdat dit pakket het niet kon.
 
-Deno.test("stuurt video als een video-deel, niet als input_audio", async () => {
+test("stuurt video als een video-deel, niet als input_audio", async () => {
   const f = metAntwoorden({ content: "hallo uit de video" });
   try {
     const r = await transcribeerAudio({
@@ -1272,7 +1310,7 @@ Deno.test("stuurt video als een video-deel, niet als input_audio", async () => {
   }
 });
 
-Deno.test("audio blijft input_audio, ook nu video bestaat", async () => {
+test("audio blijft input_audio, ook nu video bestaat", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await transcribeerAudio({
@@ -1292,7 +1330,7 @@ Deno.test("audio blijft input_audio, ook nu video bestaat", async () => {
   }
 });
 
-Deno.test("de standaardopdracht zegt videobericht bij video", async () => {
+test("de standaardopdracht zegt videobericht bij video", async () => {
   const f = metAntwoorden({ content: "ok" });
   try {
     await transcribeerAudio({
@@ -1313,7 +1351,7 @@ Deno.test("de standaardopdracht zegt videobericht bij video", async () => {
   }
 });
 
-Deno.test("een onbekend formaat noemt beide lijsten", async () => {
+test("een onbekend formaat noemt beide lijsten", async () => {
   await assertRejects(
     () =>
       transcribeerAudio({
@@ -1328,7 +1366,7 @@ Deno.test("een onbekend formaat noemt beide lijsten", async () => {
   );
 });
 
-Deno.test("VIDEO_FORMATEN en AUDIO_FORMATEN overlappen niet", () => {
+test("VIDEO_FORMATEN en AUDIO_FORMATEN overlappen niet", () => {
   for (const v of VIDEO_FORMATEN) {
     assert(
       !(AUDIO_FORMATEN as readonly string[]).includes(v),
@@ -1337,17 +1375,17 @@ Deno.test("VIDEO_FORMATEN en AUDIO_FORMATEN overlappen niet", () => {
   }
 });
 
-Deno.test("leesJson: kaal antwoord, het gewone geval", () => {
+test("leesJson: kaal antwoord, het gewone geval", () => {
   assertEquals(leesJson('{"a":1}'), { a: 1 });
   assertEquals(leesJson('  {"a":1}\n'), { a: 1 });
 });
 
-Deno.test("leesJson: uit een codeblok, met en zonder taalaanduiding", () => {
+test("leesJson: uit een codeblok, met en zonder taalaanduiding", () => {
   assertEquals(leesJson('```json\n{"a":1}\n```'), { a: 1 });
   assertEquals(leesJson('```\n{"a":1}\n```'), { a: 1 });
 });
 
-Deno.test(
+test(
   "leesJson: KEUZE - een fence MIDDENIN de tekst telt ook mee",
   () => {
     // Dit is het gedragsverschil tussen de twee implementaties die dit pakket
@@ -1360,28 +1398,28 @@ Deno.test(
   },
 );
 
-Deno.test("leesJson: JSON met tekst eromheen, zonder fence", () => {
+test("leesJson: JSON met tekst eromheen, zonder fence", () => {
   assertEquals(leesJson('Zeker! {"a":1} Groeten.'), { a: 1 });
 });
 
-Deno.test("leesJson: lege string en tekst zonder JSON geven null", () => {
+test("leesJson: lege string en tekst zonder JSON geven null", () => {
   assertEquals(leesJson(""), null);
   assertEquals(leesJson("   \n  "), null);
   assertEquals(leesJson("Sorry, dat kan ik niet."), null);
   assertEquals(leesJson("{ dit is geen json }"), null);
 });
 
-Deno.test("leesJson: een niet-afgesloten fence valt terug op de tekststap", () => {
+test("leesJson: een niet-afgesloten fence valt terug op de tekststap", () => {
   assertEquals(leesJson('```json\n{"a":1}'), { a: 1 });
 });
 
-Deno.test("leesJson: een fence zonder geldige JSON valt terug op de tekststap", () => {
+test("leesJson: een fence zonder geldige JSON valt terug op de tekststap", () => {
   // De stappen zijn een keten, geen keuze: mist de fence, dan mag stap (c) nog.
   const ruw = 'Voorbeeld:\n```sql\nSELECT 1;\n```\nAntwoord: {"a":1}';
   assertEquals(leesJson(ruw), { a: 1 });
 });
 
-Deno.test("leesJson: vorm array zoekt vierkante haken", () => {
+test("leesJson: vorm array zoekt vierkante haken", () => {
   assertEquals(leesJson("Hier komt ie: [1,2] klaar.", { vorm: "array" }), [
     1,
     2,
@@ -1390,20 +1428,20 @@ Deno.test("leesJson: vorm array zoekt vierkante haken", () => {
   assertEquals(leesJson("Hier komt ie: [1,2] klaar."), null);
 });
 
-Deno.test("leesJson: een kale array komt terug, ook als je een object vroeg", () => {
+test("leesJson: een kale array komt terug, ook als je een object vroeg", () => {
   // Bewust: stap (a) is een kale JSON.parse en doet GEEN vormcontrole. `vorm`
   // stuurt alleen welke haken stap (c) zoekt. Schemavalidatie blijft bij de
   // aanroeper, dus een array die geldige JSON is komt gewoon terug.
   assertEquals(leesJson("[1,2]"), [1, 2]);
 });
 
-Deno.test("leesJson: fence-inhoud hoeft geen object of array te zijn", () => {
+test("leesJson: fence-inhoud hoeft geen object of array te zijn", () => {
   // De strip-variant kon dit niet: die zoekt haken en vindt er geen.
   assertEquals(leesJson('```json\n"hallo"\n```'), "hallo");
   assertEquals(leesJson("```\n42\n```"), 42);
 });
 
-Deno.test("schatUsd: bekend tekstmodel, met de hand nagerekend", () => {
+test("schatUsd: bekend tekstmodel, met de hand nagerekend", () => {
   // 1000 x $0,0000005 = $0,0005 input, 500 x $0,000003 = $0,0015 output.
   const r = schatUsd("google/gemini-3-flash-preview", {
     prompt_tokens: 1000,
@@ -1415,7 +1453,7 @@ Deno.test("schatUsd: bekend tekstmodel, met de hand nagerekend", () => {
   assertEquals(r.geschat, false);
 });
 
-Deno.test("schatUsd: DeepSeek rekent per token, niet per miljoen", () => {
+test("schatUsd: DeepSeek rekent per token, niet per miljoen", () => {
   // 1M x $0,27/M = $0,27 en 500k x $1,10/M = $0,55, samen $0,82.
   const r = schatUsd("deepseek-v4-flash", {
     prompt_tokens: 1_000_000,
@@ -1425,7 +1463,7 @@ Deno.test("schatUsd: DeepSeek rekent per token, niet per miljoen", () => {
   assertEquals(r.geschat, false);
 });
 
-Deno.test("schatUsd: onbekend model geeft 0 en geschat", () => {
+test("schatUsd: onbekend model geeft 0 en geschat", () => {
   // Bewust: liever een zichtbaar ontbrekend bedrag dan een verzonnen bedrag.
   const r = schatUsd("google/gemini-3.1-flash-lite-image", {
     prompt_tokens: 100,
@@ -1434,12 +1472,12 @@ Deno.test("schatUsd: onbekend model geeft 0 en geschat", () => {
   assertEquals(r, { usd: 0, input: 0, output: 0, geschat: true });
 });
 
-Deno.test("schatUsd: zonder usage is een tekstmodel gewoon 0, niet geschat", () => {
+test("schatUsd: zonder usage is een tekstmodel gewoon 0, niet geschat", () => {
   const r = schatUsd("google/gemini-2.5-flash");
   assertEquals(r, { usd: 0, input: 0, output: 0, geschat: false });
 });
 
-Deno.test("schatUsd: zonder usage valt beeld terug op het vaste tokenaantal", () => {
+test("schatUsd: zonder usage valt beeld terug op het vaste tokenaantal", () => {
   // 1290 beeldtokens x $0,00003 = $0,0387.
   const r = schatUsd("google/gemini-2.5-flash-image");
   assertEquals(r.output, 1290);
@@ -1447,7 +1485,7 @@ Deno.test("schatUsd: zonder usage valt beeld terug op het vaste tokenaantal", ()
   assertEquals(r.geschat, true);
 });
 
-Deno.test("TARIEVEN staan per token, niet per miljoen", () => {
+test("TARIEVEN staan per token, niet per miljoen", () => {
   // Een tarief per miljoen zou hier ordes van grootte te hoog uitkomen; deze
   // grens (1 dollarcent per token) betrapt zo'n eenheidsfout meteen.
   for (const [model, t] of Object.entries(TARIEVEN)) {
@@ -1499,7 +1537,7 @@ function metAnthropic(
 
 const metClaude = { ...sleutels, anthropic: "test-ant" };
 
-Deno.test("Claude staat tussen gemini en Lovable in", async () => {
+test("Claude staat tussen gemini en Lovable in", async () => {
   const f = metAnthropic({
     body: {
       content: [{ type: "text", text: "van claude" }],
@@ -1532,7 +1570,7 @@ Deno.test("Claude staat tussen gemini en Lovable in", async () => {
   }
 });
 
-Deno.test("zonder Anthropic-sleutel loopt de keten zoals voorheen", async () => {
+test("zonder Anthropic-sleutel loopt de keten zoals voorheen", async () => {
   const f = metAnthropic({ status: 500 });
   try {
     await assertRejects(() => callAi(vraag, { label: "t", sleutels }));
@@ -1542,7 +1580,7 @@ Deno.test("zonder Anthropic-sleutel loopt de keten zoals voorheen", async () => 
   }
 });
 
-Deno.test("een 400 van Claude (tegoed op) valt door naar Lovable", async () => {
+test("een 400 van Claude (tegoed op) valt door naar Lovable", async () => {
   // Het maandtegoed op geeft een 400 "credit balance too low". Geen herkansing,
   // wel de volgende provider: daar is Lovable precies voor.
   let n = 0;
@@ -1577,7 +1615,7 @@ Deno.test("een 400 van Claude (tegoed op) valt door naar Lovable", async () => {
   }
 });
 
-Deno.test("Claude: system, beeld en toolgeschiedenis in Messages-vorm", () => {
+test("Claude: system, beeld en toolgeschiedenis in Messages-vorm", () => {
   const body = bouwAnthropicBody({
     model: "claude-haiku-5-5",
     messages: [
@@ -1623,7 +1661,7 @@ Deno.test("Claude: system, beeld en toolgeschiedenis in Messages-vorm", () => {
   ]);
 });
 
-Deno.test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
+test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
   // ☠️ Haiku 5.5 geeft een 400 op een niet-standaard temperature en weigert een
   // afgedwongen tool met denkwerk aan. Een 400 herkanst de keten niet.
   const body = bouwAnthropicBody({
@@ -1654,7 +1692,7 @@ Deno.test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
   assert(String(body.system).includes("JSON"));
 });
 
-Deno.test("Claude: geeft tool calls terug in OpenAI-vorm", async () => {
+test("Claude: geeft tool calls terug in OpenAI-vorm", async () => {
   const f = metAnthropic({
     body: {
       content: [{ type: "tool_use", id: "t1", name: "zoek", input: { q: 1 } }],
@@ -1681,7 +1719,7 @@ Deno.test("Claude: geeft tool calls terug in OpenAI-vorm", async () => {
   }
 });
 
-Deno.test("Claude: een weigering zonder tekst valt door", async () => {
+test("Claude: een weigering zonder tekst valt door", async () => {
   const f = metAnthropic(
     { body: { content: [], stop_reason: "refusal" } },
     { content: "lov" },
@@ -1698,7 +1736,7 @@ Deno.test("Claude: een weigering zonder tekst valt door", async () => {
   }
 });
 
-Deno.test("schatUsd kent Claude Haiku 5.5", () => {
+test("schatUsd kent Claude Haiku 5.5", () => {
   const r = schatUsd("claude-haiku-5-5", {
     prompt_tokens: 1_000_000,
     completion_tokens: 1_000_000,
