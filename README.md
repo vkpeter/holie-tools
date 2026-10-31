@@ -841,6 +841,12 @@ Volgorde: **taal van de pagina, dan `en`, dan `standaard`.** Een regio valt
 terug op de hoofdtaal (`fr-BE` wordt `fr`). Een lege string of `null` telt als
 "die taal heeft de site niet".
 
+⚠️ **De terugval op Engels geldt enkel voor de externe site waarnaar je linkt.**
+Onze eigen sites hebben geen vaste standaardtaal en geen vaste talenset: elke
+site wordt gebouwd in de taal of talen die de klant vraagt. De helper werkt met
+elke taalcode van onze kant (`nl`, `es`, `ar`, `tr`, `pt-br`, ...); `taal` is
+gewoon de taal van de pagina waarop de link staat.
+
 Voorbeeld: ese-scissors.eu (nl/en/de/fr) linkt naar kyone.com, dat Engels als
 standaard heeft plus NL en DE, maar geen FR. De Franse ESE-pagina linkt dus naar
 de Engelse Kyone-pagina.
@@ -870,9 +876,10 @@ curl -sL https://kyone.com/ | grep -io '<link[^>]*hreflang[^>]*>'
 De adressen horen in de databank of de config van het project, naast de rest van
 de gegevens van die partner of stichter. Twee vormen:
 
-- **Kolommen:** `website_url` (standaard) plus `website_url_nl`,
-  `website_url_de`, `website_url_fr`, ... Laat een kolom leeg (`null`) als de
-  site die taal niet heeft.
+- **Kolommen:** `website_url` (standaard) plus één kolom per taal van onze site,
+  `website_url_<taal>`: bij ESE `_nl`, `_de`, `_fr`, bij een Spaans- Arabische
+  site `_es`, `_ar`. Laat een kolom leeg (`null`) als de externe site die taal
+  niet heeft.
 - **Een object per taal** in config of JSON:
   `{ standaard: "https://kyone.com/", nl: "https://kyone.com/nl/", de: "..." }`.
   Sleutels in kleine letters.

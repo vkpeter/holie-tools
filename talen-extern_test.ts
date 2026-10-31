@@ -81,6 +81,23 @@ Deno.test("externeLinkUitRij: kolommen website_url plus website_url_<taal>", () 
   );
 });
 
+Deno.test("externeLink: werkt met elke taalcode, niet enkel nl/en/de/fr", () => {
+  const site = {
+    standaard: "https://voorbeeld.ma/",
+    ar: "https://voorbeeld.ma/ar/",
+    es: "https://voorbeeld.ma/es/",
+  };
+  assertEquals(externeLink(site, "ar"), "https://voorbeeld.ma/ar/");
+  assertEquals(externeLink(site, "es-MA"), "https://voorbeeld.ma/es/");
+  assertEquals(externeLink(site, "tr"), "https://voorbeeld.ma/");
+  const rij = {
+    website_url: "https://x.ma/",
+    website_url_tr: "https://x.ma/tr/",
+  };
+  assertEquals(externeLinkUitRij(rij, "website_url", "tr"), "https://x.ma/tr/");
+  assertEquals(externeLinkUitRij(rij, "website_url", "ar"), "https://x.ma/");
+});
+
 Deno.test("externeLinkUitRij: geen enkel adres geeft undefined", () => {
   assertEquals(
     externeLinkUitRij({ website_url: "" }, "website_url", "nl"),
