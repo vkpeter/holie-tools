@@ -108,6 +108,16 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.20.0 (talen): links naar een externe site in de taal van de pagina
+
+`externeLink(urls, taal)` en `externeLinkUitRij(rij, kolom, taal)` kiezen het
+adres van een externe site in de taal van de pagina, met terugval op Engels en
+dan op de standaardtaal van die site. De regel en hoe je de taalversies meet
+staan bij [talen](#links-naar-een-externe-site-020).
+
+Puur toegevoegd, niets verandert aan bestaande functies. ⚠️ `^0.19` sluit 0.20
+uit: zet de import op `@holie/tools@^0.20` om de nieuwe functies te krijgen.
+
 ## Nieuw in 0.19.0 (ai): Claude staat vooraan
 
 `callAi` staat standaard op **`["anthropic", "deepseek", "gemini", "lovable"]`**
@@ -819,6 +829,73 @@ Hier valt zo'n cookie door naar Accept-Language.
 Losse bouwstenen: `ontleedAcceptLanguage(header)`, `pasTaal(waarde, talen)`,
 `normaliseerTaal(waarde, talen, standaard)` (vervangt `normalizeLanguage` met
 zijn `slice(0, 2)`) en `leesCookie(header, naam)`.
+
+### Links naar een externe site (0.20)
+
+**Regel (Peter, 31-10-2026), voor elk project:** een link naar een externe site
+verwijst altijd naar de versie in dezelfde taal als de pagina waarop hij staat.
+Heeft die site die taal niet, dan de Engelse versie. Is er ook geen Engels, dan
+de standaardtaal van die externe site (haar gewone adres, het `x-default`).
+
+Volgorde: **taal van de pagina, dan `en`, dan `standaard`.** Een regio valt
+terug op de hoofdtaal (`fr-BE` wordt `fr`). Een lege string of `null` telt als
+"die taal heeft de site niet".
+
+Voorbeeld: ese-scissors.eu (nl/en/de/fr) linkt naar kyone.com, dat Engels als
+standaard heeft plus NL en DE, maar geen FR. De Franse ESE-pagina linkt dus naar
+de Engelse Kyone-pagina.
+
+#### 1. Meet de taalversies, gok ze niet
+
+Lees de `hreflang`-links in de `<head>` van de externe site:
+
+```bash
+curl -sL https://kyone.com/ | grep -io '<link[^>]*hreflang[^>]*>'
+```
+
+- Elke `hreflang="xx"` is een taalversie met haar eigen adres. Neem dat adres
+  letterlijk over: het patroon (`/fr/`, `?lang=fr`, `fr.site.com`) verschilt per
+  site, en een zelfgebouwd `/fr/` geeft vaak een 404 of stuurt stil door naar
+  het Engels.
+- `hreflang="x-default"` (of, zonder x-default, het gewone adres) is
+  `standaard`.
+- Linkt de pagina naar een dieper adres (een productpagina, een over-ons), meet
+  dan de `hreflang` van **die** pagina, niet van de homepagina.
+- Geen `hreflang` in de `<head>`? Kijk naar de taalkiezer op de site en open elk
+  adres om te zien dat het echt in die taal staat. Vind je geen taalversies, dan
+  is er enkel `standaard`.
+
+#### 2. Zet de adressen per taal in de data, niet in de code
+
+De adressen horen in de databank of de config van het project, naast de rest van
+de gegevens van die partner of stichter. Twee vormen:
+
+- **Kolommen:** `website_url` (standaard) plus `website_url_nl`,
+  `website_url_de`, `website_url_fr`, ... Laat een kolom leeg (`null`) als de
+  site die taal niet heeft.
+- **Een object per taal** in config of JSON:
+  `{ standaard: "https://kyone.com/", nl: "https://kyone.com/nl/", de: "..." }`.
+  Sleutels in kleine letters.
+
+⚠️ **Is de standaardtaal van de externe site niet Engels, vul dan ook `_en` in**
+(als ze Engels heeft). Anders valt een Franse pagina door naar de standaard, in
+dit geval bv. Nederlands, in plaats van naar het Engels.
+
+#### 3. Kies het adres met de helper
+
+```ts
+import { externeLink, externeLinkUitRij } from "@holie/tools/talen";
+
+// Uit een databankrij met kolommen website_url, website_url_nl, ...
+const href = externeLinkUitRij(stichter, "website_url", lang);
+// undefined als de rij geen enkel adres heeft: laat de link dan weg.
+
+// Uit een object per taal:
+externeLink(
+  { standaard: "https://kyone.com/", nl: "https://kyone.com/nl/" },
+  "fr",
+); // https://kyone.com/ (geen fr, geen en: standaard)
+```
 
 ## mcp-bundel
 

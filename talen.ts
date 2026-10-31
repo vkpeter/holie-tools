@@ -307,3 +307,73 @@ export function kiesTaal<T extends string>(opties: KiesTaalOpties<T>): T {
   }
   return standaard;
 }
+
+// ---------------------------------------------------------------------------
+// Links naar een externe site, in de taal van de pagina (regel van Peter, 31-10-2026).
+//
+// Volgorde: de taal van de pagina, dan Engels, dan de standaardtaal van de externe site
+// (haar gewone adres, het x-default uit haar hreflang-links). Welke taalversies een
+// externe site heeft, meet je in haar <head> (hreflang), je gokt het niet.
+// ---------------------------------------------------------------------------
+
+/**
+ * De adressen van één externe site per taal. `standaard` is het gewone adres van die
+ * site (haar x-default); de andere sleutels zijn taalcodes (`nl`, `en`, `fr`, ...).
+ * Een lege string, `null` of `undefined` telt als "die taal heeft de site niet".
+ */
+export interface ExterneUrls {
+  standaard: string;
+  [taal: string]: string | null | undefined;
+}
+
+const gevuld = (v: unknown): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim() : undefined;
+
+/** `nl-BE` wordt `["nl-be", "nl"]`; een lege waarde geeft niets. */
+const taalSleutels = (taal: string | null | undefined): string[] => {
+  const t = (taal ?? "").trim().toLowerCase().replace(/_/g, "-");
+  if (!t) return [];
+  const hoofd = t.split("-")[0];
+  return hoofd === t ? [t] : [t, hoofd];
+};
+
+/**
+ * Het adres van een externe site voor een pagina in `taal`: eerst die taal (een regio
+ * valt terug op de hoofdtaal, `fr-BE` wordt `fr`), dan `en`, dan `standaard`.
+ *
+ * ```ts
+ * const kyone = { standaard: "https://kyone.com/", nl: "https://kyone.com/nl/" };
+ * externeLink(kyone, "nl"); // https://kyone.com/nl/
+ * externeLink(kyone, "fr"); // https://kyone.com/ (geen fr, geen en: standaard)
+ * ```
+ */
+export function externeLink(
+  urls: ExterneUrls,
+  taal: string | null | undefined,
+): string {
+  for (const sleutel of [...taalSleutels(taal), "en"]) {
+    if (sleutel === "standaard") continue;
+    const url = gevuld(urls[sleutel]);
+    if (url) return url;
+  }
+  return gevuld(urls.standaard) ?? urls.standaard;
+}
+
+/**
+ * Hetzelfde voor een databankrij met een kolom per taal: `kolom` is het standaardadres
+ * (bv. `website_url`), `${kolom}_${taal}` de taalversies (`website_url_nl`,
+ * `website_url_en`, ...). Geeft `undefined` als de rij geen enkel adres heeft, zodat de
+ * pagina de link kan weglaten.
+ */
+export function externeLinkUitRij(
+  rij: Record<string, unknown> | null | undefined,
+  kolom: string,
+  taal: string | null | undefined,
+): string | undefined {
+  if (!rij) return undefined;
+  for (const sleutel of [...taalSleutels(taal), "en"]) {
+    const url = gevuld(rij[`${kolom}_${sleutel}`]);
+    if (url) return url;
+  }
+  return gevuld(rij[kolom]);
+}
