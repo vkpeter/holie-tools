@@ -10,6 +10,7 @@ import {
   callAi,
   genereerBeeld,
   meldAiVerbruik,
+  PAKKET_VERSIE,
   stelAiBeleidIn,
   VERBRUIK_BUNDEL_MS,
   wisAiVerbruik,
@@ -162,7 +163,7 @@ test(
     await aiVerbruikVersturen();
     const posts = verbruikPosts(oproepen);
     assertEquals(posts.length, 1);
-    assertEquals(posts[0].v, "0.27.0");
+    assertEquals(posts[0].v, PAKKET_VERSIE);
     assertEquals(posts[0].regels[0].aanroepen, 2);
     assertEquals(aiVerbruikWachtrij(), []);
   },
@@ -314,5 +315,44 @@ test(
     );
     await callAi(vraag, { label: "t", sleutels: alle });
     assertEquals(aiVerbruikWachtrij(), []);
+  },
+);
+
+test(
+  "Worker: aiVerbruikVersturen wacht op de POST die al onderweg is",
+  async (oproepen, zet) => {
+    const echt = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: { userAgent: "Cloudflare-Workers" },
+      configurable: true,
+    });
+    try {
+      stelAiBeleidIn({
+        project: "ese",
+        momentopname: AI_BELEID,
+        verbruik: NEP,
+      });
+      let losLaten: () => void = () => {};
+      let klaar = false;
+      zet((url) => {
+        if (url !== NEP) return claudeOk();
+        return new Promise<Response>((r) => {
+          losLaten = () => {
+            klaar = true;
+            r(verbruikOk());
+          };
+        });
+      });
+      await callAi(vraag, { label: "t", sleutels: alle, gegevens: "publiek" });
+      await Promise.resolve();
+      assertEquals(aiVerbruikWachtrij(), []); // al onderweg
+      const wacht = aiVerbruikVersturen();
+      setTimeout(() => losLaten(), 20);
+      await wacht;
+      assert(klaar, "aiVerbruikVersturen keerde terug vóór de POST klaar was");
+      assertEquals(verbruikPosts(oproepen).length, 1);
+    } finally {
+      if (echt) Object.defineProperty(globalThis, "navigator", echt);
+    }
   },
 );

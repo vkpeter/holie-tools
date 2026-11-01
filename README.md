@@ -108,6 +108,12 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.27.1 (ai): `aiVerbruikVersturen` wacht op lopende verzendingen
+
+In een Cloudflare Worker vertrekt de verbruiksmelding meteen, dus de wachtrij
+was al leeg als `ctx.waitUntil(aiVerbruikVersturen())` liep en de POST bleef
+onbeschermd. Nu wacht `aiVerbruikVersturen()` ook op wat al onderweg is.
+
 ## Nieuw in 0.27.0 (telegram): kort geheugen voor bots
 
 Een bot die vrije tekst door een AI laat lezen, vergat tot nu elk vorig bericht.

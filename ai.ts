@@ -56,7 +56,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.27.0";
+export const PAKKET_VERSIE = "0.27.1";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -1232,6 +1232,8 @@ const wachtrij = new Map<string, VerbruikRegel>();
 let verbruikTimer: ReturnType<typeof setTimeout> | undefined;
 let verbruikKlaar: (() => void) | undefined;
 let verbruikMicro = false;
+/** Verzendingen die nog lopen: `aiVerbruikVersturen` wacht erop (0.27.1). */
+const lopend = new Set<Promise<void>>();
 
 /** `YYYY-MM-DD` in Europe/Brussels. */
 export function brusselseDag(d: Date = new Date()): string {
@@ -1334,7 +1336,7 @@ function planVerbruik(url: string): void {
     wacht(
       Promise.resolve().then(() => {
         verbruikMicro = false;
-        return verstuurVerbruik(url);
+        return verstuur(url);
       }).catch(() => {}),
     );
     return;
@@ -1347,9 +1349,17 @@ function planVerbruik(url: string): void {
     verbruikTimer = undefined;
     const r = verbruikKlaar;
     verbruikKlaar = undefined;
-    verstuurVerbruik(url).catch(() => {}).finally(() => r?.());
+    verstuur(url).finally(() => r?.());
   }, VERBRUIK_BUNDEL_MS);
   wacht(klaar);
+}
+
+/** Start een verzending en onthoudt ze tot ze klaar is. Gooit nooit. */
+function verstuur(url: string): Promise<void> {
+  const p = verstuurVerbruik(url).catch(() => {});
+  lopend.add(p);
+  p.finally(() => lopend.delete(p));
+  return p;
 }
 
 async function verstuurVerbruik(url: string): Promise<void> {
@@ -1387,8 +1397,11 @@ export async function aiVerbruikVersturen(): Promise<void> {
   verbruikKlaar = undefined;
   try {
     const url = verbruiksadres();
-    if (url) await verstuurVerbruik(url);
+    if (url) await verstuur(url);
     else wachtrij.clear();
+    // Ook wat al onderweg was (in een Worker vertrekt de POST meteen in een microtaak):
+    // zo beschermt `ctx.waitUntil(aiVerbruikVersturen())` die verzending echt.
+    await Promise.all([...lopend]);
   } catch {
     // stil
   } finally {
