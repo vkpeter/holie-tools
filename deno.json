@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.27.1",
+  "version": "0.28.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -16,7 +16,9 @@
     "./codes": "./codes.ts",
     "./beleid": "./beleid.ts",
     "./ai-beleid": "./ai-beleid.ts",
-    "./nieuwsbrief": "./nieuwsbrief.ts"
+    "./nieuwsbrief": "./nieuwsbrief.ts",
+    "./login": "./login.ts",
+    "./google-terug": "./google-terug.ts"
   },
   "publish": {
     "include": [
@@ -37,6 +39,8 @@
       "sql/rate_limit_hit.sql",
       "sql/telegram_onaf.sql",
       "sql/nieuwsbrief.sql",
+      "login.ts",
+      "google-terug.ts",
       "README.md",
       "LICENSE"
     ]
@@ -47,9 +51,18 @@
     "publiceer": "deno run --allow-read --allow-env=HOLIE_AI_BELEID_SLEUTEL --allow-net=beleid.holie.be,billara-api.holie.be beleid/publiceer.ts"
   },
   "imports": {
-    "@std/assert": "jsr:@std/assert@1"
+    "@std/assert": "jsr:@std/assert@1",
+    "react": "npm:react@^19.0.0",
+    "@types/react": "npm:@types/react@^19.0.0",
+    "react-dom": "npm:react-dom@^19.0.0",
+    "@happy-dom/global-registrator": "npm:@happy-dom/global-registrator@^20.0.0"
   },
   "exclude": [],
   "fmt": { "exclude": ["beleid/python/verwachting.json"] },
-  "lint": { "exclude": ["beleid/python/"] }
+  "lint": { "exclude": ["beleid/python/"] },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "jsxImportSourceTypes": "@types/react"
+  }
 }

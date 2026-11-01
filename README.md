@@ -108,6 +108,71 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.28.0: `./login` en `./google-terug`, één loginblok voor alle apps
+
+Elke app had een eigen loginpagina, met de Google-knop soms boven en soms onder
+het formulier. `./login` is het gedeelde blok, met een vaste volgorde: **Google
+bovenaan, dan "of", dan het e-mailformulier**. Het kent geen router en geen
+supabase-client, en draagt geen Tailwind-klassen.
+
+⚠️ Het blok importeert React niet zelf. Een JSR-pakket kan geen bereik "React 18
+of 19" vastleggen, en een vaste versie gaf een React-18-app een tweede
+React-kopie. De app geeft daarom zijn eigen React mee, één keer:
+
+```tsx
+// src/components/LoginBlok.tsx
+import * as React from "react";
+import { maakLoginBlok } from "@holie/tools/login";
+export const LoginBlok = maakLoginBlok(React);
+```
+
+```tsx
+import {
+  bewaarGoogleTerug,
+  googleTerugMelding,
+  neemGoogleTerug,
+} from "@holie/tools/google-terug";
+bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit flow)
+
+<LoginBlok
+  onGoogle={async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+    return error?.message; // een string is een foutmelding
+  }}
+  onEmail={async (email, wachtwoord) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: wachtwoord,
+    });
+    return error ? "Ongeldig e-mailadres of wachtwoord." : null;
+  }}
+  wachtwoordVergeten={{ href: "/wachtwoord" }} // of { onClick: (email) => ... } of { render }
+  melding={googleTerugMelding(neemGoogleTerug())}
+  onderdelen={{ Knop: Button, Invoer: Input, Label }} // shadcn van de app, optioneel
+/>;
+```
+
+- **Google-knop**: officieel G-logo, neutrale knop (wit, grijze rand; donker
+  onder `.dark`), tekst "Doorgaan met Google" (en/fr/de: de officiële
+  vertalingen van Google). Na de vorige-knop van de browser staat hij weer klaar
+  (`pageshow`).
+- **Teksten**: `taal` (`nl`, `en`, `fr`, `de`) plus losse `teksten` (bv.
+  `inloggen: "Aanmelden"`).
+- **Slots**: `emailHint`, `onderFormulier` (onthoud mij, uitnodigingstekst, link
+  naar registreren), `children` vervangt het formulier (registreren) terwijl de
+  volgorde blijft.
+- **Tests**: `ids={{ email: "email", wachtwoord: "password" }}` voor tests die
+  `#email` zoeken; `klassen` per onderdeel voor een app zonder Tailwind
+  (Roundbook).
+- `./google-terug`: `leesGoogleTerug(search, hash)` geeft `code` (PKCE),
+  `niet_uitgenodigd` ("Signups not allowed"), `geannuleerd`, `fout` of `leeg`;
+  `googleTerugMelding` maakt er de melding van ("geen uitnodiging" en
+  "afgebroken" zijn `info`, geen rode fout); `urlZonderGoogleTerug` kuist de URL
+  op en laat `next` staan.
+
 ## Nieuw in 0.27.1 (ai): `aiVerbruikVersturen` wacht op lopende verzendingen
 
 In een Cloudflare Worker vertrekt de verbruiksmelding meteen, dus de wachtrij
