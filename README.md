@@ -108,7 +108,7 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
-## Nieuw in 0.28.0: `./login` en `./google-terug`, één loginblok voor alle apps
+## Nieuw in 0.28.1: `./login` en `./google-terug`, één loginblok voor alle apps
 
 Elke app had een eigen loginpagina, met de Google-knop soms boven en soms onder
 het formulier. `./login` is het gedeelde blok, met een vaste volgorde: **Google

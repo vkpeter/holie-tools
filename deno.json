@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.28.0",
+  "version": "0.28.1",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -47,7 +47,7 @@
   },
   "tasks": {
     "test": "deno test --allow-env --allow-read --allow-write",
-    "beleid": "deno run --allow-read --allow-write beleid/momentopname.ts",
+    "beleid": "deno run --allow-read --allow-write beleid/momentopname.ts && deno fmt ai-beleid.ts",
     "publiceer": "deno run --allow-read --allow-env=HOLIE_AI_BELEID_SLEUTEL --allow-net=beleid.holie.be,billara-api.holie.be beleid/publiceer.ts"
   },
   "imports": {
