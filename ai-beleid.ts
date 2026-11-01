@@ -11,8 +11,8 @@ import type { AiBeleid } from "./beleid.ts";
 
 export const AI_BELEID: AiBeleid = {
   "schema": 1,
-  "volgnummer": 2,
-  "uitgegeven": "2026-11-01T10:24:51Z",
+  "volgnummer": 3,
+  "uitgegeven": "2026-11-01T11:11:29Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
@@ -177,6 +177,19 @@ export const AI_BELEID: AiBeleid = {
       "datum": "2026-11-01",
       "bron":
         "Projecten/AI-providervolgorde - audit en centrale schakelaar (1 nov 2026)",
+    },
+    {
+      "provider": "anthropic",
+      "types": [
+        "tekst",
+      ],
+      "project": "billara-klantmail",
+      "van": "2026-11-01",
+      "reden":
+        "klantmail: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026",
     },
   ],
   "toelatingen": [
@@ -447,6 +460,28 @@ export const AI_BELEID: AiBeleid = {
       "wie": "Peter",
       "datum": "2026-11-01",
     },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "shintaka",
+      "status": "testfase",
+      "reden":
+        "Claude en DeepSeek toegelaten bij Shintaka, ook voor de Telegram-inhoud (salonnamen, voornamen)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026",
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "billara-klantmail",
+      "status": "testfase",
+      "reden":
+        "enkel als terugval wanneer Claude er niet is, voor de continuiteit van de klantmail; Claude blijft vooraan door de projectvoorrang",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026",
+    },
   ],
   "contexten": {
     "roundbook": {
@@ -490,7 +525,7 @@ export const AI_BELEID: AiBeleid = {
     },
     "shintaka": {
       "omschrijving":
-        "Shintaka-webshop: artikels, vertalingen; Telegram-flows geven context roundbook mee",
+        "Shintaka-webshop: artikels, vertalingen (publiek); Telegram-flows geven gegevens persoon mee. Claude en DeepSeek toegelaten (Peter 1 nov 2026)",
       "gegevens": "publiek",
     },
     "ese": {
@@ -528,6 +563,11 @@ export const AI_BELEID: AiBeleid = {
     "merlin": {
       "omschrijving": "Merlin (OpenClaw op de Pi)",
       "gegevens": "prive-peter",
+    },
+    "billara-klantmail": {
+      "omschrijving":
+        "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+      "gegevens": "persoon",
     },
   },
 };

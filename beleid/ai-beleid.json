@@ -1,12 +1,16 @@
 {
   "schema": 1,
-  "volgnummer": 2,
-  "uitgegeven": "2026-11-01T10:24:51Z",
+  "volgnummer": 3,
+  "uitgegeven": "2026-11-01T11:11:29Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
       "naam": "Claude (Anthropic API)",
-      "capaciteiten": ["tekst", "tools", "beeld-in"],
+      "capaciteiten": [
+        "tekst",
+        "tools",
+        "beeld-in"
+      ],
       "aanroepbaar": true,
       "tier": "betalend tegoed; maandlimiet USD 100 in de Console",
       "dataprofiel": {
@@ -19,7 +23,12 @@
     },
     "deepseek": {
       "naam": "DeepSeek",
-      "capaciteiten": ["tekst", "tools", "beeld-in", "live-spraak"],
+      "capaciteiten": [
+        "tekst",
+        "tools",
+        "beeld-in",
+        "live-spraak"
+      ],
       "aanroepbaar": true,
       "dataprofiel": {
         "regio": "China",
@@ -31,7 +40,12 @@
     },
     "gemini": {
       "naam": "Gemini (Google, gratis API)",
-      "capaciteiten": ["tekst", "tools", "beeld-in", "audio-in"],
+      "capaciteiten": [
+        "tekst",
+        "tools",
+        "beeld-in",
+        "audio-in"
+      ],
       "aanroepbaar": true,
       "tier": "gratis: dagquotum per Google-project; beeld-uit quotum nul (429, 19 sep 2026); beeld-in niet apart nagemeten",
       "dataprofiel": {
@@ -43,7 +57,13 @@
     },
     "lovable": {
       "naam": "Lovable AI-gateway",
-      "capaciteiten": ["tekst", "tools", "beeld-in", "audio-in", "beeld-uit"],
+      "capaciteiten": [
+        "tekst",
+        "tools",
+        "beeld-in",
+        "audio-in",
+        "beeld-uit"
+      ],
       "aanroepbaar": true,
       "dataprofiel": {
         "dpa": "ja",
@@ -53,49 +73,103 @@
     },
     "meta": {
       "naam": "Meta Model API (Muse Image)",
-      "capaciteiten": ["beeld-uit"],
+      "capaciteiten": [
+        "beeld-uit"
+      ],
       "aanroepbaar": true
     },
     "mistral": {
       "naam": "Mistral",
-      "capaciteiten": ["tekst"],
+      "capaciteiten": [
+        "tekst"
+      ],
       "aanroepbaar": false,
       "tier": "enkel Eendje-vertaling, eigen code; niet aanroepbaar via @holie/tools",
-      "dataprofiel": { "regio": "EU", "bron": "niet nagemeten" }
+      "dataprofiel": {
+        "regio": "EU",
+        "bron": "niet nagemeten"
+      }
     },
     "huggingface": {
       "naam": "Hugging Face",
-      "capaciteiten": ["tts"],
+      "capaciteiten": [
+        "tts"
+      ],
       "aanroepbaar": false,
       "tier": "Tarifit-TTS en pyannote, eigen scripts"
     },
     "nebius": {
       "naam": "Nebius",
-      "capaciteiten": ["embeddings"],
+      "capaciteiten": [
+        "embeddings"
+      ],
       "aanroepbaar": false,
       "tier": "embeddings van Merlin (OpenClaw)"
     }
   },
   "basis": {
-    "tekst": ["deepseek", "gemini", "anthropic", "lovable"],
-    "tools": ["deepseek", "gemini", "anthropic", "lovable"],
-    "beeld-in": ["deepseek", "gemini", "anthropic", "lovable"],
-    "audio-in": ["gemini", "lovable"],
-    "beeld-uit": ["meta", "lovable"],
-    "tts": ["huggingface"],
-    "embeddings": ["nebius"],
-    "live-spraak": ["deepseek"]
+    "tekst": [
+      "deepseek",
+      "gemini",
+      "anthropic",
+      "lovable"
+    ],
+    "tools": [
+      "deepseek",
+      "gemini",
+      "anthropic",
+      "lovable"
+    ],
+    "beeld-in": [
+      "deepseek",
+      "gemini",
+      "anthropic",
+      "lovable"
+    ],
+    "audio-in": [
+      "gemini",
+      "lovable"
+    ],
+    "beeld-uit": [
+      "meta",
+      "lovable"
+    ],
+    "tts": [
+      "huggingface"
+    ],
+    "embeddings": [
+      "nebius"
+    ],
+    "live-spraak": [
+      "deepseek"
+    ]
   },
   "voorrang": [
     {
       "provider": "anthropic",
-      "types": ["tekst", "tools", "beeld-in"],
+      "types": [
+        "tekst",
+        "tools",
+        "beeld-in"
+      ],
       "van": "2026-10-28",
       "tot": "2027-01-31",
       "reden": "Claude-tegoed USD 251 (Console, 1 nov 2026), maandlimiet USD 100: ruwweg tot eind januari. Eerder op = 400 'credit balance' en de negatieve cache slaat Claude 10 min over.",
       "wie": "Peter",
       "datum": "2026-11-01",
       "bron": "Projecten/AI-providervolgorde - audit en centrale schakelaar (1 nov 2026)"
+    },
+    {
+      "provider": "anthropic",
+      "types": [
+        "tekst"
+      ],
+      "project": "billara-klantmail",
+      "van": "2026-11-01",
+      "reden": "klantmail: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026"
     }
   ],
   "toelatingen": [
@@ -137,7 +211,6 @@
       "herzien": "na nameting Anthropic-DPA, vóór commerciële lancering",
       "bron": "panel 1 nov 2026, #2"
     },
-
     {
       "provider": "deepseek",
       "gegevens": "publiek",
@@ -188,7 +261,6 @@
       "herzien": "commerciële lancering; geldig_tot is een voorlopige datum zolang de lancering niet gepland is",
       "bron": "Peter 1 nov 2026; panel #4"
     },
-
     {
       "provider": "gemini",
       "gegevens": "publiek",
@@ -226,7 +298,6 @@
       "herzien": "vóór commerciële lancering",
       "bron": "panel 1 nov 2026, #1"
     },
-
     {
       "provider": "lovable",
       "gegevens": "publiek",
@@ -264,7 +335,6 @@
       "herzien": "vóór commerciële lancering",
       "bron": "panel 1 nov 2026, #1"
     },
-
     {
       "provider": "meta",
       "gegevens": "publiek",
@@ -299,7 +369,6 @@
       "wie": "Peter",
       "datum": "2026-11-01"
     },
-
     {
       "provider": "mistral",
       "gegevens": "publiek",
@@ -333,7 +402,6 @@
       "wie": "Peter",
       "datum": "2026-11-01"
     },
-
     {
       "provider": "huggingface",
       "gegevens": "publiek",
@@ -365,6 +433,26 @@
       "reden": "Merlin-geheugen",
       "wie": "Peter",
       "datum": "2026-11-01"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "shintaka",
+      "status": "testfase",
+      "reden": "Claude en DeepSeek toegelaten bij Shintaka, ook voor de Telegram-inhoud (salonnamen, voornamen)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "billara-klantmail",
+      "status": "testfase",
+      "reden": "enkel als terugval wanneer Claude er niet is, voor de continuiteit van de klantmail; Claude blijft vooraan door de projectvoorrang",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026"
     }
   ],
   "contexten": {
@@ -403,7 +491,7 @@
       "context": "roundbook"
     },
     "shintaka": {
-      "omschrijving": "Shintaka-webshop: artikels, vertalingen; Telegram-flows geven context roundbook mee",
+      "omschrijving": "Shintaka-webshop: artikels, vertalingen (publiek); Telegram-flows geven gegevens persoon mee. Claude en DeepSeek toegelaten (Peter 1 nov 2026)",
       "gegevens": "publiek"
     },
     "ese": {
@@ -418,7 +506,10 @@
       "omschrijving": "Phyllox: moderatie van gebruikersinhoud, Telegram",
       "gegevens": "persoon"
     },
-    "holie": { "omschrijving": "holie.be", "gegevens": "publiek" },
+    "holie": {
+      "omschrijving": "holie.be",
+      "gegevens": "publiek"
+    },
     "podcast": {
       "omschrijving": "podcast-analyse: duiden, wegen, groeperen",
       "gegevens": "publiek"
@@ -438,6 +529,10 @@
     "merlin": {
       "omschrijving": "Merlin (OpenClaw op de Pi)",
       "gegevens": "prive-peter"
+    },
+    "billara-klantmail": {
+      "omschrijving": "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+      "gegevens": "persoon"
     }
   }
 }

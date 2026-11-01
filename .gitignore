@@ -4,3 +4,4 @@
 node_modules/
 deno.lock
 .wrangler/
+__pycache__/

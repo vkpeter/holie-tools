@@ -131,6 +131,12 @@ Regels die erbij horen:
   batch, dan `nieuwsbrief_vrijgeven` voor die batch. Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
+## Nieuw in 0.25.1 (ai-beleid)
+
+Momentopname op beleid volgnummer 3: DeepSeek toegelaten voor persoonsgegevens in Shintaka,
+en project `billara-klantmail` (Claude altijd eerst, DeepSeek enkel als terugval).
+`PAKKET_VERSIE` staat weer gelijk met `deno.json` (0.25.0 meldde zich als 0.24.0).
+
 ## Nieuw in 0.24.0 (ai): `kiesAiVolgorde`
 
 Voor code die zelf over providers loopt, of een provider aanspreekt die dit
