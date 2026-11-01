@@ -108,6 +108,21 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.29.0: ogg-spraak via Gemini, denkruimte voor Claude
+
+- **ogg bij Gemini via de eigen route.** Google's OpenAI-compatibele route
+  aanvaardt enkel wav en mp3 en gaf op ogg (Telegram-spraakberichten) een 400.
+  `transcribeerAudio` stuurt ogg nu naar `generateContent` met `inline_data`
+  (`GEMINI_NATIEF_FORMATEN`); de andere formaten blijven op de OpenAI-route.
+  Zonder dit viel elk spraakbericht door naar de betalende Lovable-gateway.
+- **Denkruimte voor Claude.** Haiku 5.5 denkt standaard mee en dat telt mee in
+  `max_tokens`. Bij een krappe `maxTokens` brak het antwoord af en viel de keten
+  terug op DeepSeek (Foodie-synoniemen, elke batch). Claude krijgt nu
+  `maxTokens + 8000` (`ANTHROPIC_DENKRUIMTE`); `maxTokens` blijft de maat voor
+  het antwoord en voor de andere providers.
+
+Bijwerken: `jsr:@holie/tools@^0.29.0/ai`. Geen andere wijziging in de aanroep.
+
 ## Nieuw in 0.28.1: `./login` en `./google-terug`, één loginblok voor alle apps
 
 Elke app had een eigen loginpagina, met de Google-knop soms boven en soms onder

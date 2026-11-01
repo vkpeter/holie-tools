@@ -322,6 +322,93 @@ export function isVideoFormaat(formaat: string): formaat is VideoFormaat {
   return (VIDEO_FORMATEN as readonly string[]).includes(formaat);
 }
 
+/**
+ * Audioformaten die bij Gemini via de EIGEN `generateContent`-route gaan in plaats
+ * van de OpenAI-compatibele route. Die laatste aanvaardt enkel wav en mp3 en gaf op
+ * ogg een 400 (gemeten 1-11-2026, Telegram-spraakberichten in Billara). De eigen
+ * route las dezelfde ogg goed met `gemini-3.5-flash-lite` en `gemini-3.1-flash-lite`,
+ * zonder denktokens. Enkel ogg staat erin: de andere formaten werken op de
+ * OpenAI-route en zijn daar getoetst.
+ */
+export const GEMINI_NATIEF_FORMATEN = ["ogg"] as const;
+
+const AUDIO_MIME: Record<string, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mp3",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  aac: "audio/aac",
+  aiff: "audio/aiff",
+};
+
+/** Adres van Gemini's eigen `generateContent` voor dit model. */
+export function geminiNatiefAdres(model: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${
+    encodeURIComponent(model)
+  }:generateContent`;
+}
+
+/** Request-body voor een transcriptie via Gemini's eigen route. */
+export function bouwGeminiAudioBody(o: {
+  systeem: string;
+  opdracht: string;
+  base64: string;
+  formaat: string;
+  maxTokens: number;
+  temperature: number;
+}): Record<string, unknown> {
+  return {
+    systemInstruction: { parts: [{ text: o.systeem }] },
+    contents: [{
+      role: "user",
+      parts: [
+        {
+          inline_data: {
+            mime_type: AUDIO_MIME[o.formaat] ?? `audio/${o.formaat}`,
+            data: o.base64,
+          },
+        },
+        { text: o.opdracht },
+      ],
+    }],
+    generationConfig: {
+      maxOutputTokens: o.maxTokens,
+      temperature: o.temperature,
+    },
+  };
+}
+
+/**
+ * Zet een antwoord van Gemini's eigen route om naar de OpenAI-vorm
+ * (`choices[0].message.content`, `usage`), zodat `transcribeerAudio` één pad houdt.
+ * Denkdelen (`thought: true`) tellen niet als tekst.
+ */
+// deno-lint-ignore no-explicit-any
+export function leesGeminiNatief(ruw: any): any {
+  // deno-lint-ignore no-explicit-any
+  const delen: any[] = ruw?.candidates?.[0]?.content?.parts ?? [];
+  const tekst = delen
+    .filter((d) => d?.thought !== true && typeof d?.text === "string")
+    .map((d) => d.text)
+    .join("");
+  const u = ruw?.usageMetadata;
+  return {
+    choices: [{
+      message: { content: tekst },
+      finish_reason: ruw?.candidates?.[0]?.finishReason,
+    }],
+    usage: u
+      ? {
+        prompt_tokens: Number(u.promptTokenCount ?? 0),
+        completion_tokens: Number(u.candidatesTokenCount ?? 0) +
+          Number(u.thoughtsTokenCount ?? 0),
+        total_tokens: Number(u.totalTokenCount ?? 0),
+      }
+      : undefined,
+    ...(ruw?.error ? { error: ruw.error } : {}),
+  };
+}
+
 const ENDPOINT: Record<AiProvider, string> = {
   /**
    * Google's eigen OpenAI-compatibele endpoint. Neemt dezelfde payload als de
@@ -500,6 +587,22 @@ export function bouwDeepseekBody(opties: {
 /** Zonder `maxTokens` van de aanroeper; de Messages API eist het veld. */
 const ANTHROPIC_MAX_TOKENS = 16000;
 
+/**
+ * Ruimte voor het denkwerk van Claude, BOVENOP de `maxTokens` van de aanroeper.
+ *
+ * ☠️ Haiku 5.5 denkt standaard mee (adaptief, ook op effort `low`) en dat denkwerk
+ * telt mee in `max_tokens`. Gemeten 1-11-2026, synoniemen voor 40 producten:
+ * bij `max_tokens` 4000 gingen ~3100 tokens naar denkwerk en brak het JSON-antwoord
+ * af (`stop_reason: max_tokens`); bij 16000 klaar na 2381 tokens in totaal. Foodie
+ * viel daardoor op ELKE batch terug op DeepSeek. Hoeveel het model denkt, schommelt
+ * per aanroep, dus een krappe limiet faalt willekeurig.
+ *
+ * `maxTokens` van de aanroeper blijft de maat voor het ANTWOORD (en voor de andere
+ * providers); voor Claude komt deze ruimte erbij. Denken uitzetten kan niet
+ * model-onafhankelijk: Opus 5.5 en Sonnet 5.5 geven een 400 op `disabled`.
+ */
+const ANTHROPIC_DENKRUIMTE = 8000;
+
 // deno-lint-ignore no-explicit-any
 type Blok = Record<string, any>;
 
@@ -605,7 +708,9 @@ export function bouwAnthropicBody(opties: {
 
   const body: Record<string, unknown> = {
     model: opties.model,
-    max_tokens: opties.maxTokens ?? ANTHROPIC_MAX_TOKENS,
+    max_tokens: opties.maxTokens !== undefined
+      ? opties.maxTokens + ANTHROPIC_DENKRUIMTE
+      : ANTHROPIC_MAX_TOKENS,
     messages: berichten,
     // Een vangnet, geen denkwerk: laag houdt het goedkoop en snel.
     output_config: { effort: "low" },
@@ -2024,51 +2129,82 @@ async function transcribeerAudioKern(
         const start = Date.now();
         let status = 0;
         try {
-          const resp = await fetch(ENDPOINT[provider], {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${sleutel}`,
-              "Content-Type": "application/json",
-            },
-            signal: combineerSignalen(opties.timeoutMs, opties.signal),
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: "system",
-                  content: opties.systeem ??
-                    (opties.domein
-                      ? audioSysteem(opties.domein)
-                      : AUDIO_SYSTEEM),
-                },
-                {
-                  role: "user",
-                  content: [
-                    video
-                      ? {
-                        type: "video",
-                        video: {
-                          data: opties.base64,
-                          format: opties.formaat,
+          // ogg (Telegram-spraakberichten) kan niet via Google's OpenAI-route:
+          // die geeft 400 "Valid formats are: [wav, mp3]" (gemeten 1-11-2026). De
+          // eigen generateContent-route leest ogg wel, met dezelfde sleutel en
+          // dezelfde modelnamen. Enkel dat geval gaat langs die weg; de andere
+          // formaten blijven op de geteste OpenAI-route.
+          const natief = provider === "gemini" && !video &&
+            (GEMINI_NATIEF_FORMATEN as readonly string[]).includes(
+              opties.formaat,
+            );
+          const systeemTekst = opties.systeem ??
+            (opties.domein ? audioSysteem(opties.domein) : AUDIO_SYSTEEM);
+          const resp = natief
+            ? await fetch(geminiNatiefAdres(model), {
+              method: "POST",
+              headers: {
+                "x-goog-api-key": sleutel,
+                "Content-Type": "application/json",
+              },
+              signal: combineerSignalen(opties.timeoutMs, opties.signal),
+              body: JSON.stringify(bouwGeminiAudioBody({
+                systeem: systeemTekst,
+                opdracht,
+                base64: opties.base64,
+                formaat: opties.formaat,
+                maxTokens: opties.maxTokens ?? 500,
+                temperature: opties.temperature ?? 0.1,
+              })),
+            })
+            : await fetch(ENDPOINT[provider], {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${sleutel}`,
+                "Content-Type": "application/json",
+              },
+              signal: combineerSignalen(opties.timeoutMs, opties.signal),
+              body: JSON.stringify({
+                model,
+                messages: [
+                  {
+                    role: "system",
+                    content: opties.systeem ??
+                      (opties.domein
+                        ? audioSysteem(opties.domein)
+                        : AUDIO_SYSTEEM),
+                  },
+                  {
+                    role: "user",
+                    content: [
+                      video
+                        ? {
+                          type: "video",
+                          video: {
+                            data: opties.base64,
+                            format: opties.formaat,
+                          },
+                        }
+                        : {
+                          type: "input_audio",
+                          input_audio: {
+                            data: opties.base64,
+                            format: opties.formaat,
+                          },
                         },
-                      }
-                      : {
-                        type: "input_audio",
-                        input_audio: {
-                          data: opties.base64,
-                          format: opties.formaat,
-                        },
-                      },
-                    { type: "text", text: opdracht },
-                  ],
-                },
-              ],
-              max_tokens: opties.maxTokens ?? 500,
-              temperature: opties.temperature ?? 0.1,
-            }),
-          });
+                      { type: "text", text: opdracht },
+                    ],
+                  },
+                ],
+                max_tokens: opties.maxTokens ?? 500,
+                temperature: opties.temperature ?? 0.1,
+              }),
+            });
           status = resp.status;
-          const data = await resp.json().catch(() => ({}));
+          const ruw = await resp.json().catch(() => ({}));
+          // Het native antwoord krijgt dezelfde vorm als het OpenAI-antwoord,
+          // zodat de foutafhandeling en de verbruiksteller hieronder één pad houden.
+          const data = natief ? leesGeminiNatief(ruw) : ruw;
           const tekst = data?.choices?.[0]?.message?.content ?? "";
           const duurMs = Date.now() - start;
 

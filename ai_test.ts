@@ -599,6 +599,85 @@ test("neemt de gratis Gemini-route vóór de betalende gateway", async () => {
   }
 });
 
+test("ogg gaat bij Gemini via de eigen generateContent-route", async () => {
+  // De OpenAI-route van Google weigert ogg (400, "Valid formats are: [wav, mp3]",
+  // gemeten 1-11-2026); Telegram-spraakberichten zijn ogg. De eigen route leest ogg.
+  const aanroepen: {
+    url: string;
+    headers: Headers;
+    body: Record<string, unknown>;
+  }[] = [];
+  const origineel = globalThis.fetch;
+  globalThis.fetch = ((url: string, init: RequestInit) => {
+    aanroepen.push({
+      url,
+      headers: new Headers(init.headers),
+      body: JSON.parse(String(init.body)),
+    });
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          candidates: [{
+            content: {
+              parts: [
+                { text: "ik denk na", thought: true },
+                { text: "twee sneden brood" },
+              ],
+            },
+            finishReason: "STOP",
+          }],
+          usageMetadata: {
+            promptTokenCount: 525,
+            candidatesTokenCount: 4,
+            totalTokenCount: 529,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+  }) as typeof fetch;
+  try {
+    const r = await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "ogg",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assertEquals(r.tekst, "twee sneden brood");
+    assertEquals(r.provider, "gemini");
+    assertEquals(aanroepen.length, 1);
+    assert(
+      aanroepen[0].url.endsWith(
+        `/models/${STANDAARD_MODELLEN.geminiAudio[0]}:generateContent`,
+      ),
+    );
+    assertEquals(aanroepen[0].headers.get("x-goog-api-key"), "test-gem");
+    assertEquals(aanroepen[0].headers.get("authorization"), null);
+    const delen = (aanroepen[0].body.contents as { parts: unknown[] }[])[0]
+      .parts as Record<string, unknown>[];
+    assertEquals(delen[0], {
+      inline_data: { mime_type: "audio/ogg", data: "AAAA" },
+    });
+  } finally {
+    globalThis.fetch = origineel;
+  }
+});
+
+test("wav blijft bij Gemini op de OpenAI-route", async () => {
+  const f = metAntwoorden({ content: "ok" });
+  try {
+    await transcribeerAudio({
+      label: "t",
+      base64: "AAAA",
+      formaat: "wav",
+      sleutels: { ...sleutels, gemini: "test-gem" },
+    });
+    assert(f.aanroepen[0].url.endsWith("/openai/chat/completions"));
+  } finally {
+    f.herstel();
+  }
+});
+
 test("valt bij een opgebruikt gratis quotum door naar Lovable", async () => {
   // Een 429 op de gratis route is een leeg DAGquotum, niet een storing. Het
   // tweede gratis model deelt hetzelfde projectquotum, dus dat overslaan is het
@@ -665,12 +744,14 @@ test("een afgedwongen model geldt voor elke provider", async () => {
 });
 
 test("stuurt de audio als input_audio in een user-bericht", async () => {
+  // wav, niet ogg: ogg gaat bij Gemini sinds 1-11-2026 via de eigen route (zie
+  // "ogg gaat bij Gemini via de eigen generateContent-route").
   const f = metAntwoorden({ content: "ok" });
   try {
     await transcribeerAudio({
       label: "t",
       base64: "AAAA",
-      formaat: "ogg",
+      formaat: "wav",
       taal: "nl",
       sleutels,
     });
@@ -682,7 +763,7 @@ test("stuurt de audio als input_audio in een user-bericht", async () => {
     const delen = msgs[1].content as Array<Record<string, unknown>>;
     assertEquals(delen[0], {
       type: "input_audio",
-      input_audio: { data: "AAAA", format: "ogg" },
+      input_audio: { data: "AAAA", format: "wav" },
     });
     // De taalhint is op 16-09-2026 van "Taalhint: nl." naar een gewone zin
     // gegaan: een model volgt een instructie in lopende taal beter dan een label.
@@ -1681,7 +1762,8 @@ test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
   assert(!("temperature" in body));
   assert(!("tool_choice" in body));
   assert(!("response_format" in body));
-  assertEquals(body.max_tokens, 200);
+  // 200 voor het antwoord plus de denkruimte van Claude (zie ANTHROPIC_DENKRUIMTE).
+  assertEquals(body.max_tokens, 8200);
   assertEquals(body.tools, [{
     name: "zoek",
     description: "d",
