@@ -108,6 +108,28 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.23.0 (ai): het beleid komt van een ondertekend adres
+
+Onder beleid haalt het pakket het beleid op bij
+`https://beleid.holie.be/ai-beleid.json` (Cloudflare Worker `holie-ai-beleid`,
+code in `beleid/worker.js`):
+
+- **Ondertekend** met Ed25519 (`BELEID_PUBLIEKE_SLEUTEL`). Een vervalst of
+  gewijzigd bestand wordt geweigerd; de Worker zelf aanvaardt enkel een geldig
+  ondertekend bestand met een hoger volgnummer, dus er staat daar geen geheim.
+- **Harde timeout 600 ms**, vers 5 min, daarna verouderd-maar-bruikbaar tot 24 u
+  met verversing op de achtergrond. Ouder of onbereikbaar: de momentopname,
+  anders het noodbeleid. Na een mislukte ophaling een minuut niet opnieuw
+  wachten.
+- Een opgehaald bestand met een lager volgnummer dan de momentopname wint nooit.
+- Het ophalen meldt `?project=...&v=0.23.0`; `GET /lezers` toont per project de
+  versie en wanneer het laatst gelezen werd. Een project dat daar niet staat, is
+  NIET ONDER BELEID.
+- `HOLIE_AI_BELEID_URL` zet een ander adres, `uit` haalt niets op;
+  `stelAiBeleidIn({ url: false })` idem. `aiBeleidStatus()` voor diagnose.
+- Publiceren: `deno task publiceer` (ondertekent met `HOLIE_AI_BELEID_SLEUTEL`).
+  Vanaf fase C doet Tickbook dat.
+
 ## Nieuw in 0.22.0 (ai): het AI-beleid
 
 Eén beleid voor alle projecten bepaalt welke provider een aanroep mag en in

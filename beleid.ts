@@ -601,3 +601,89 @@ export const NOODBELEID: AiBeleid = (() => {
     standaard_gegevens: "persoon",
   };
 })();
+
+// ---------------------------------------------------------------------------
+// Ondertekend beleid (sinds 0.23.0)
+// ---------------------------------------------------------------------------
+
+/** Waar het ondertekende beleid staat (Cloudflare Worker `holie-ai-beleid`). */
+export const BELEID_URL = "https://beleid.holie.be/ai-beleid.json";
+
+/**
+ * De publieke Ed25519-sleutel (raw, base64) waarmee het beleid ondertekend is. De
+ * privésleutel staat bij de schrijver (Tickbook, en `HOLIE_AI_BELEID_SLEUTEL` op Peters
+ * laptop), nooit in dit pakket of in de Worker.
+ */
+export const BELEID_PUBLIEKE_SLEUTEL =
+  "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o=";
+
+/** Het bestand op het beleidsadres: de inhoud als tekst plus de handtekening erover. */
+export interface BeleidEnvelop {
+  schema: 1;
+  /** Het beleid als JSON-tekst; de handtekening gaat over exact deze bytes. */
+  inhoud: string;
+  /** Ed25519 over UTF-8(inhoud), base64. */
+  handtekening: string;
+}
+
+const naarBytes = (b64: string) =>
+  Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+const naarB64 = (b: ArrayBuffer) => {
+  let s = "";
+  for (const x of new Uint8Array(b)) s += String.fromCharCode(x);
+  return btoa(s);
+};
+
+/** Ondertekent een beleid met een Ed25519-privésleutel (PKCS#8, base64). */
+export async function ondertekenBeleid(
+  beleid: AiBeleid,
+  privesleutelPkcs8: string,
+): Promise<BeleidEnvelop> {
+  valideerBeleid(beleid);
+  const inhoud = JSON.stringify(beleid);
+  const sleutel = await crypto.subtle.importKey(
+    "pkcs8",
+    naarBytes(privesleutelPkcs8),
+    { name: "Ed25519" },
+    false,
+    ["sign"],
+  );
+  const handtekening = await crypto.subtle.sign(
+    { name: "Ed25519" },
+    sleutel,
+    new TextEncoder().encode(inhoud),
+  );
+  return { schema: 1, inhoud, handtekening: naarB64(handtekening) };
+}
+
+/**
+ * Controleert een envelop en geeft het beleid terug. Gooit een `TypeError` als de
+ * handtekening niet klopt of de inhoud geen geldig beleid is.
+ */
+export async function controleerEnvelop(
+  envelop: unknown,
+  publiekeSleutel: string = BELEID_PUBLIEKE_SLEUTEL,
+): Promise<AiBeleid> {
+  const e = envelop as Partial<BeleidEnvelop> | null;
+  if (
+    !e || e.schema !== 1 || typeof e.inhoud !== "string" ||
+    typeof e.handtekening !== "string"
+  ) {
+    throw new TypeError("ongeldig beleidsenvelop");
+  }
+  const sleutel = await crypto.subtle.importKey(
+    "raw",
+    naarBytes(publiekeSleutel),
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+  const ok = await crypto.subtle.verify(
+    { name: "Ed25519" },
+    sleutel,
+    naarBytes(e.handtekening),
+    new TextEncoder().encode(e.inhoud),
+  );
+  if (!ok) throw new TypeError("handtekening van het beleid klopt niet");
+  return valideerBeleid(JSON.parse(e.inhoud));
+}

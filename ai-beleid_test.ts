@@ -23,6 +23,7 @@ const AI_VARS = [
   "ANTHROPIC_API_KEY",
   "META_MODEL_API_KEY",
   "HOLIE_AI_PROJECT",
+  "HOLIE_AI_BELEID_URL",
 ];
 const alle = {
   anthropic: "t-a",
@@ -43,6 +44,8 @@ function test(
   Deno.test(naam, async () => {
     const bewaard = AI_VARS.map((v) => [v, Deno.env.get(v)] as const);
     for (const v of AI_VARS) Deno.env.delete(v);
+    // Geen ophaling in deze tests, tenzij een test zelf een adres instelt.
+    Deno.env.set("HOLIE_AI_BELEID_URL", "uit");
     wisTegoedCache();
     stelAiBeleidIn({});
     const echt = globalThis.fetch;

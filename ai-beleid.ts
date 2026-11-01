@@ -11,8 +11,8 @@ import type { AiBeleid } from "./beleid.ts";
 
 export const AI_BELEID: AiBeleid = {
   "schema": 1,
-  "volgnummer": 1,
-  "uitgegeven": "2026-11-01T18:00:00Z",
+  "volgnummer": 2,
+  "uitgegeven": "2026-11-01T10:24:51Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {

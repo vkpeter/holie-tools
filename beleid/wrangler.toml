@@ -1,0 +1,17 @@
+# Worker die het ondertekende AI-beleid serveert. Uitrollen: npx wrangler@4 deploy (vanuit deze map).
+name = "holie-ai-beleid"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+account_id = "8d6586e8997335306bf09b2a27da4e9a"
+workers_dev = false
+
+routes = [{ pattern = "beleid.holie.be", custom_domain = true }]
+
+[[kv_namespaces]]
+binding = "BELEID"
+id = "e61037c2d76346b0b7a0592acaa9dd6e"
+
+[vars]
+# Ed25519, raw, base64. De privésleutel staat in de Windows-gebruikersomgeving als
+# HOLIE_AI_BELEID_SLEUTEL (en later bij Tickbook), nooit hier.
+PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="

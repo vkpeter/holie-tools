@@ -23,7 +23,10 @@
 import {
   type AiBeleid,
   type AiType,
+  BELEID_PUBLIEKE_SLEUTEL,
+  BELEID_URL,
   BeleidLeeg,
+  controleerEnvelop,
   type Gegevens,
   type KeuzeStap,
   type KeuzeUitslag,
@@ -41,7 +44,19 @@ export type {
   KeuzeUitslag,
   StapVerslag,
 } from "./beleid.ts";
-export { kiesProviders, NOODBELEID, valideerBeleid } from "./beleid.ts";
+export {
+  BELEID_PUBLIEKE_SLEUTEL,
+  BELEID_URL,
+  controleerEnvelop,
+  kiesProviders,
+  NOODBELEID,
+  ondertekenBeleid,
+  valideerBeleid,
+} from "./beleid.ts";
+export type { BeleidEnvelop } from "./beleid.ts";
+
+/** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
+export const PAKKET_VERSIE = "0.23.0";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -812,29 +827,61 @@ export interface BeleidOpties {
   toestemming?: readonly string[];
 }
 
-let ingesteld: { project?: string; momentopname?: AiBeleid } = {};
+interface Instelling {
+  project?: string;
+  momentopname?: AiBeleid;
+  /** Beleidsadres; `false` = niet ophalen (enkel momentopname). */
+  url?: string | false;
+  publiekeSleutel?: string;
+}
+let ingesteld: Instelling = {};
 let gewaarschuwdZonderBeleid = false;
+
+/** Zo lang geldt een opgehaald beleid als vers. */
+export const BELEID_VERS_MS = 5 * 60 * 1000;
+/** Ouder dan dit wordt een opgehaald beleid niet meer gebruikt (panel #5). */
+export const BELEID_MAX_MS = 24 * 60 * 60 * 1000;
+/** Harde timeout op het ophalen: een trage Worker mag geen aanroep ophouden. */
+export const BELEID_TIMEOUT_MS = 600;
+/** Na een mislukte ophaling zo lang niet opnieuw wachten op het adres. */
+const BELEID_PAUZE_MS = 60 * 1000;
+
+let opgehaald: { beleid: AiBeleid; tijd: number } | undefined;
+let bezig: Promise<void> | undefined;
+let laatstMislukt = 0;
 
 /**
  * Zet een project onder beleid. Roep dit eenmaal op in de gedeelde AI-laag van het project:
  *
  * ```ts
- * import { AI_BELEID } from "./ai-beleid.ts"; // momentopname, bij elke uitrol ververst
+ * import { AI_BELEID } from "jsr:@holie/tools@^0.23/ai-beleid";
  * stelAiBeleidIn({ project: "foodie", momentopname: AI_BELEID });
  * ```
  *
- * De momentopname is de terugval als het beleidsadres onbereikbaar is (panel #5). Zonder
- * momentopname geldt dan het strenge `NOODBELEID` uit het pakket.
+ * Het beleid komt van het ondertekende adres (`BELEID_URL`, of `HOLIE_AI_BELEID_URL`), met
+ * een harde timeout. Lukt dat niet, dan de momentopname (panel #5); zonder momentopname het
+ * strenge `NOODBELEID` uit het pakket. `url: false` (of `HOLIE_AI_BELEID_URL=uit`) haalt
+ * niets op.
  */
 export function stelAiBeleidIn(
-  opties: { project?: string; momentopname?: unknown },
+  opties: {
+    project?: string;
+    momentopname?: unknown;
+    url?: string | false;
+    publiekeSleutel?: string;
+  },
 ): void {
   ingesteld = {
     project: opties.project,
     momentopname: opties.momentopname === undefined
       ? undefined
       : valideerBeleid(opties.momentopname),
+    url: opties.url,
+    publiekeSleutel: opties.publiekeSleutel,
   };
+  opgehaald = undefined;
+  bezig = undefined;
+  laatstMislukt = 0;
 }
 
 /** Het project waaronder deze omgeving draait, of `undefined` (niet onder beleid). */
@@ -842,15 +889,107 @@ export function aiProject(opties?: BeleidOpties): string | undefined {
   return opties?.project ?? ingesteld.project ?? leesEnv("HOLIE_AI_PROJECT");
 }
 
-/**
- * Het beleid dat nu geldt: de ingestelde momentopname, anders het noodbeleid. (Fase B voegt
- * daar het opgehaalde, ondertekende bestand vóór.)
- */
-export function huidigAiBeleid(): { beleid: AiBeleid; bron: string } {
+function beleidsadres(): string | undefined {
+  if (ingesteld.url === false) return undefined;
+  if (ingesteld.url) return ingesteld.url;
+  const env = leesEnv("HOLIE_AI_BELEID_URL");
+  if (env === "uit") return undefined;
+  return env || BELEID_URL;
+}
+
+async function haalBeleid(url: string, project: string): Promise<void> {
+  const adres = `${url}${url.includes("?") ? "&" : "?"}project=${
+    encodeURIComponent(project)
+  }&v=${PAKKET_VERSIE}`;
+  const r = await fetch(adres, {
+    signal: AbortSignal.timeout(BELEID_TIMEOUT_MS),
+  });
+  if (!r.ok) throw new Error(`beleidsadres gaf ${r.status}`);
+  const beleid = await controleerEnvelop(
+    await r.json(),
+    ingesteld.publiekeSleutel ?? BELEID_PUBLIEKE_SLEUTEL,
+  );
+  const minimum = Math.max(
+    ingesteld.momentopname?.volgnummer ?? 0,
+    opgehaald?.beleid.volgnummer ?? 0,
+  );
+  if (beleid.volgnummer < minimum) {
+    throw new Error(
+      `beleidsadres geeft volgnummer ${beleid.volgnummer}, ouder dan ${minimum}`,
+    );
+  }
+  opgehaald = { beleid, tijd: Date.now() };
+}
+
+function ververs(url: string, project: string): Promise<void> {
+  bezig ??= haalBeleid(url, project).catch((e) => {
+    laatstMislukt = Date.now();
+    console.warn(`[ai] beleid niet opgehaald: ${foutTekst(e)}`);
+  }).finally(() => {
+    bezig = undefined;
+  });
+  return bezig;
+}
+
+function terugval(): { beleid: AiBeleid; bron: string } {
   if (ingesteld.momentopname) {
     return { beleid: ingesteld.momentopname, bron: "momentopname" };
   }
   return { beleid: NOODBELEID, bron: "noodbeleid" };
+}
+
+/**
+ * Het beleid dat nu geldt voor `project`: vers opgehaald (< 5 min), verouderd maar bruikbaar
+ * (< 24 u, wordt op de achtergrond ververst), anders de momentopname of het noodbeleid.
+ * Een nieuwere momentopname wint van een ouder opgehaald bestand.
+ */
+export async function huidigAiBeleid(
+  project?: string,
+): Promise<{ beleid: AiBeleid; bron: string }> {
+  const url = beleidsadres();
+  const p = project ?? aiProject();
+  if (!url || !p) return terugval();
+  const nu = Date.now();
+  const kies = (bron: string) => {
+    const snap = ingesteld.momentopname;
+    if (
+      opgehaald && (!snap || opgehaald.beleid.volgnummer >= snap.volgnummer)
+    ) return { beleid: opgehaald.beleid, bron };
+    return terugval();
+  };
+  const leeftijd = opgehaald ? nu - opgehaald.tijd : Infinity;
+  if (leeftijd < BELEID_VERS_MS) return kies("beleidsadres");
+  if (leeftijd < BELEID_MAX_MS) {
+    if (nu - laatstMislukt > BELEID_PAUZE_MS) void ververs(url, p);
+    return kies("beleidsadres (wordt ververst)");
+  }
+  if (nu - laatstMislukt > BELEID_PAUZE_MS) {
+    await ververs(url, p);
+    if (opgehaald) return kies("beleidsadres");
+  }
+  return terugval();
+}
+
+/** Voor diagnose: waar het beleid nu vandaan komt en welk volgnummer. */
+export function aiBeleidStatus(): {
+  project?: string;
+  pakket: string;
+  momentopname?: number;
+  opgehaald?: { volgnummer: number; leeftijdMs: number };
+  adres?: string;
+} {
+  return {
+    project: aiProject(),
+    pakket: PAKKET_VERSIE,
+    momentopname: ingesteld.momentopname?.volgnummer,
+    opgehaald: opgehaald
+      ? {
+        volgnummer: opgehaald.beleid.volgnummer,
+        leeftijdMs: Date.now() - opgehaald.tijd,
+      }
+      : undefined,
+    adres: beleidsadres(),
+  };
 }
 
 /** Het beleid liet geen provider over. Ook een `AiOnbeschikbaar`, met `status` 0. */
@@ -910,7 +1049,7 @@ interface Keuze {
  * De providerlijst voor één aanroep. Onder beleid volgens `kiesProviders`; zonder project de
  * oude werking (volgorde, zonder sleutel overslaan), maar met de negatieve cache.
  */
-function kiesVoorAanroep(
+async function kiesVoorAanroep(
   label: string,
   type: AiType,
   opties: BeleidOpties & {
@@ -919,7 +1058,7 @@ function kiesVoorAanroep(
   },
   standaard: readonly AiProvider[],
   pakket: readonly AiProvider[],
-): Keuze {
+): Promise<Keuze> {
   const sleutelVan = (p: string) => leesSleutel(p as AiProvider, opties);
   const project = aiProject(opties);
   if (!project) {
@@ -947,7 +1086,7 @@ function kiesVoorAanroep(
     }
     return { volgorde };
   }
-  const { beleid, bron } = huidigAiBeleid();
+  const { beleid, bron } = await huidigAiBeleid(project);
   try {
     const uitslag = kiesProviders(beleid, {
       type,
@@ -1038,7 +1177,7 @@ export async function callAi(
 
   const type: AiType = opties.type ??
     (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
-  const keuze = kiesVoorAanroep(
+  const keuze = await kiesVoorAanroep(
     label,
     type,
     { ...opties, volgorde: opties.volgorde },
@@ -1434,7 +1573,7 @@ export async function transcribeerAudio(
     );
   }
 
-  const audioKeuze = kiesVoorAanroep(
+  const audioKeuze = await kiesVoorAanroep(
     opties.label,
     opties.type ?? "audio-in",
     opties,
@@ -1776,7 +1915,7 @@ function beeldMime(bytes: Uint8Array, terugval: string): string {
 export async function genereerBeeld(
   opties: BeeldOpties,
 ): Promise<BeeldAntwoord> {
-  const beeldKeuze = kiesVoorAanroep(
+  const beeldKeuze = await kiesVoorAanroep(
     opties.label,
     opties.type ?? "beeld-uit",
     opties,
