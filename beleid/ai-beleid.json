@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "volgnummer": 4,
-  "uitgegeven": "2026-11-01T11:23:33Z",
+  "volgnummer": 5,
+  "uitgegeven": "2026-11-01T13:30:58Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
@@ -167,6 +167,19 @@
       "project": "billara-klantmail",
       "van": "2026-11-01",
       "reden": "klantmail: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026"
+    },
+    {
+      "provider": "anthropic",
+      "types": [
+        "tekst",
+        "tools"
+      ],
+      "project": "billara-telefoon",
+      "van": "2026-11-01",
+      "reden": "telefoonagent: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
       "wie": "Peter",
       "datum": "2026-11-01",
       "bron": "Peter in de chat, 1 nov 2026"
@@ -457,6 +470,20 @@
       "geldig_tot": "2027-05-01",
       "toestemming_vereist": false,
       "herzien": "geldig_tot is een voorlopige datum, zoals bij de Foodie-toelating; herzien bij het advocaatadvies"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "billara-telefoon",
+      "status": "testfase",
+      "reden": "Peter, 1 nov 2026: de telefoonagent (Isabel) mag niet stilvallen als Claude uitvalt. DeepSeek enkel als terugval; Claude blijft vooraan door de projectvoorrang",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026 (\"Yes, add exception\")",
+      "grondslag": "gerechtvaardigd belang (continuiteit van de dienst aan de beller); verwerkersvoorwaarden DeepSeek nog na te kijken (advocaatvragen 2.10-2.12)",
+      "geldig_tot": "2027-05-01",
+      "toestemming_vereist": false,
+      "herzien": "geldig_tot is een voorlopige datum, zoals bij de klantmail; herzien bij het advocaatadvies"
     }
   ],
   "contexten": {
@@ -536,6 +563,10 @@
     },
     "billara-klantmail": {
       "omschrijving": "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+      "gegevens": "persoon"
+    },
+    "billara-telefoon": {
+      "omschrijving": "Tickbook-telefoonagent (voice-ai.ts, Isabel): Claude gestreamd, DeepSeek als terugval",
       "gegevens": "persoon"
     }
   }

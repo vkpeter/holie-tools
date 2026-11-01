@@ -11,8 +11,8 @@ import type { AiBeleid } from "./beleid.ts";
 
 export const AI_BELEID: AiBeleid = {
   "schema": 1,
-  "volgnummer": 4,
-  "uitgegeven": "2026-11-01T11:23:33Z",
+  "volgnummer": 5,
+  "uitgegeven": "2026-11-01T13:30:58Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
@@ -20,7 +20,7 @@ export const AI_BELEID: AiBeleid = {
       "capaciteiten": [
         "tekst",
         "tools",
-        "beeld-in",
+        "beeld-in"
       ],
       "aanroepbaar": true,
       "tier": "betalend tegoed; maandlimiet USD 100 in de Console",
@@ -29,9 +29,8 @@ export const AI_BELEID: AiBeleid = {
         "dpa": "onbekend",
         "scc": "onbekend",
         "training": "onbekend",
-        "bron":
-          "niet nagemeten; FOO-228 vermeldt Anthropic enkel terloops (panel 1 nov 2026, #2)",
-      },
+        "bron": "niet nagemeten; FOO-228 vermeldt Anthropic enkel terloops (panel 1 nov 2026, #2)"
+      }
     },
     "deepseek": {
       "naam": "DeepSeek",
@@ -39,7 +38,7 @@ export const AI_BELEID: AiBeleid = {
         "tekst",
         "tools",
         "beeld-in",
-        "live-spraak",
+        "live-spraak"
       ],
       "aanroepbaar": true,
       "dataprofiel": {
@@ -47,9 +46,8 @@ export const AI_BELEID: AiBeleid = {
         "dpa": "onbekend",
         "scc": "nee",
         "training": "onbekend",
-        "bron":
-          "AVG-panel Roundbook 28 okt 2026: geen adequaatheidsbesluit, geen SCC; advocaatvragen 2.10-2.12",
-      },
+        "bron": "AVG-panel Roundbook 28 okt 2026: geen adequaatheidsbesluit, geen SCC; advocaatvragen 2.10-2.12"
+      }
     },
     "gemini": {
       "naam": "Gemini (Google, gratis API)",
@@ -57,18 +55,16 @@ export const AI_BELEID: AiBeleid = {
         "tekst",
         "tools",
         "beeld-in",
-        "audio-in",
+        "audio-in"
       ],
       "aanroepbaar": true,
-      "tier":
-        "gratis: dagquotum per Google-project; beeld-uit quotum nul (429, 19 sep 2026); beeld-in niet apart nagemeten",
+      "tier": "gratis: dagquotum per Google-project; beeld-uit quotum nul (429, 19 sep 2026); beeld-in niet apart nagemeten",
       "dataprofiel": {
         "regio": "VS",
         "dpa": "onbekend",
         "training": "nee",
-        "bron":
-          "ai.google.dev/gemini-api/terms, 19 sep 2026: in de EER gelden de betaalvoorwaarden (geen training); FOO-228: 'geen gevoelige info'",
-      },
+        "bron": "ai.google.dev/gemini-api/terms, 19 sep 2026: in de EER gelden de betaalvoorwaarden (geen training); FOO-228: 'geen gevoelige info'"
+      }
     },
     "lovable": {
       "naam": "Lovable AI-gateway",
@@ -77,89 +73,87 @@ export const AI_BELEID: AiBeleid = {
         "tools",
         "beeld-in",
         "audio-in",
-        "beeld-uit",
+        "beeld-uit"
       ],
       "aanroepbaar": true,
       "dataprofiel": {
         "dpa": "ja",
         "bewaartermijn": "90 dagen prompt-logging",
-        "bron":
-          "FOO-228: DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging",
-      },
+        "bron": "FOO-228: DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging"
+      }
     },
     "meta": {
       "naam": "Meta Model API (Muse Image)",
       "capaciteiten": [
-        "beeld-uit",
+        "beeld-uit"
       ],
-      "aanroepbaar": true,
+      "aanroepbaar": true
     },
     "mistral": {
       "naam": "Mistral",
       "capaciteiten": [
-        "tekst",
+        "tekst"
       ],
       "aanroepbaar": false,
-      "tier":
-        "enkel Eendje-vertaling, eigen code; niet aanroepbaar via @holie/tools",
+      "tier": "enkel Eendje-vertaling, eigen code; niet aanroepbaar via @holie/tools",
       "dataprofiel": {
         "regio": "EU",
-        "bron": "niet nagemeten",
-      },
+        "bron": "niet nagemeten"
+      }
     },
     "huggingface": {
       "naam": "Hugging Face",
       "capaciteiten": [
-        "tts",
+        "tts"
       ],
       "aanroepbaar": false,
-      "tier": "Tarifit-TTS en pyannote, eigen scripts",
+      "tier": "Tarifit-TTS en pyannote, eigen scripts"
     },
     "nebius": {
       "naam": "Nebius",
       "capaciteiten": [
-        "embeddings",
+        "embeddings"
       ],
       "aanroepbaar": false,
-      "tier": "embeddings van Merlin (OpenClaw)",
-    },
+      "tier": "embeddings van Merlin (OpenClaw)"
+    }
   },
   "basis": {
     "tekst": [
       "deepseek",
       "gemini",
       "anthropic",
-      "lovable",
+      "lovable"
     ],
     "tools": [
       "deepseek",
       "gemini",
       "anthropic",
-      "lovable",
+      "lovable"
     ],
     "beeld-in": [
       "deepseek",
       "gemini",
       "anthropic",
-      "lovable",
+      "lovable"
     ],
     "audio-in": [
       "gemini",
-      "lovable",
+      "lovable"
     ],
     "beeld-uit": [
       "meta",
-      "lovable",
+      "lovable"
     ],
     "tts": [
-      "huggingface",
+      "huggingface"
     ],
     "embeddings": [
-      "nebius",
+      "nebius"
     ],
     "live-spraak": [
-      "deepseek",
-    ],
+      "deepseek"
+    ]
   },
   "voorrang": [
     {
@@ -167,30 +161,40 @@ export const AI_BELEID: AiBeleid = {
       "types": [
         "tekst",
         "tools",
-        "beeld-in",
+        "beeld-in"
       ],
       "van": "2026-10-28",
       "tot": "2027-01-31",
-      "reden":
-        "Claude-tegoed USD 251 (Console, 1 nov 2026), maandlimiet USD 100: ruwweg tot eind januari. Eerder op = 400 'credit balance' en de negatieve cache slaat Claude 10 min over.",
+      "reden": "Claude-tegoed USD 251 (Console, 1 nov 2026), maandlimiet USD 100: ruwweg tot eind januari. Eerder op = 400 'credit balance' en de negatieve cache slaat Claude 10 min over.",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron":
-        "Projecten/AI-providervolgorde - audit en centrale schakelaar (1 nov 2026)",
+      "bron": "Projecten/AI-providervolgorde - audit en centrale schakelaar (1 nov 2026)"
+    },
+    {
+      "provider": "anthropic",
+      "types": [
+        "tekst"
+      ],
+      "project": "billara-klantmail",
+      "van": "2026-11-01",
+      "reden": "klantmail: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026"
     },
     {
       "provider": "anthropic",
       "types": [
         "tekst",
+        "tools"
       ],
-      "project": "billara-klantmail",
+      "project": "billara-telefoon",
       "van": "2026-11-01",
-      "reden":
-        "klantmail: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
+      "reden": "telefoonagent: Claude altijd eerst, DeepSeek enkel als terugval (geen einddatum)",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "Peter in de chat, 1 nov 2026",
-    },
+      "bron": "Peter in de chat, 1 nov 2026"
+    }
   ],
   "toelatingen": [
     {
@@ -200,7 +204,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "openbare tekst, geen persoonsgegevens",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "anthropic",
@@ -209,29 +213,27 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Peters eigen gegevens, eigen keuze",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "anthropic",
       "gegevens": "persoon",
       "status": "testfase",
-      "reden":
-        "ja buiten de verwerkerscontext Roundbook; DPA en doorgiftegrond niet nagemeten",
+      "reden": "ja buiten de verwerkerscontext Roundbook; DPA en doorgiftegrond niet nagemeten",
       "wie": "Peter",
       "datum": "2026-11-01",
       "herzien": "na nameting Anthropic-DPA",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "anthropic",
       "gegevens": "gezondheid",
       "status": "testfase",
-      "reden":
-        "Claude staat sinds 28 okt eerst voor Foodie, maar Anthropic staat niet in verwerkersdossier FOO-228 (DPA, doorgiftegrond, bewaartermijn niet nagemeten)",
+      "reden": "Claude staat sinds 28 okt eerst voor Foodie, maar Anthropic staat niet in verwerkersdossier FOO-228 (DPA, doorgiftegrond, bewaartermijn niet nagemeten)",
       "wie": "Peter",
       "datum": "2026-11-01",
       "herzien": "na nameting Anthropic-DPA, vóór commerciële lancering",
-      "bron": "panel 1 nov 2026, #2",
+      "bron": "panel 1 nov 2026, #2"
     },
     {
       "provider": "deepseek",
@@ -240,7 +242,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "openbare tekst",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "deepseek",
@@ -249,17 +251,16 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Peters eigen gegevens, eigen keuze",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "deepseek",
       "gegevens": "persoon",
       "status": "uitgesloten",
-      "reden":
-        "China, geen adequaatheidsbesluit, geen SCC (Roundbook: DeepSeek uit de bot)",
+      "reden": "China, geen adequaatheidsbesluit, geen SCC (Roundbook: DeepSeek uit de bot)",
       "wie": "Peter",
       "datum": "2026-10-28",
-      "bron": "AVG-panel Roundbook 28 okt 2026, punt 6",
+      "bron": "AVG-panel Roundbook 28 okt 2026, punt 6"
     },
     {
       "provider": "deepseek",
@@ -268,7 +269,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "bijzondere categorie, geen afspraak met DeepSeek",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "deepseek",
@@ -281,9 +282,8 @@ export const AI_BELEID: AiBeleid = {
       "toestemming_vereist": false,
       "wie": "Peter",
       "datum": "2026-11-01",
-      "herzien":
-        "commerciële lancering; geldig_tot is een voorlopige datum zolang de lancering niet gepland is",
-      "bron": "Peter 1 nov 2026; panel #4",
+      "herzien": "commerciële lancering; geldig_tot is een voorlopige datum zolang de lancering niet gepland is",
+      "bron": "Peter 1 nov 2026; panel #4"
     },
     {
       "provider": "gemini",
@@ -292,7 +292,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "openbare tekst",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "gemini",
@@ -301,7 +301,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Peters eigen gegevens",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "gemini",
@@ -310,18 +310,17 @@ export const AI_BELEID: AiBeleid = {
       "reden": "gemeld in Roundbook; gratis API zonder DPA niet nagemeten",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "gemini",
       "gegevens": "gezondheid",
       "status": "testfase",
-      "reden":
-        "testfase ZONDER onderbouwing: FOO-228 noemt Gemini gratis ('geen gevoelige info') een van de zwaarste risico's; nu nog nodig voor spraak in Foodie",
+      "reden": "testfase ZONDER onderbouwing: FOO-228 noemt Gemini gratis ('geen gevoelige info') een van de zwaarste risico's; nu nog nodig voor spraak in Foodie",
       "wie": "Peter",
       "datum": "2026-11-01",
       "herzien": "vóór commerciële lancering",
-      "bron": "panel 1 nov 2026, #1",
+      "bron": "panel 1 nov 2026, #1"
     },
     {
       "provider": "lovable",
@@ -330,7 +329,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "openbare tekst",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "lovable",
@@ -339,7 +338,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Peters eigen gegevens",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "lovable",
@@ -348,18 +347,17 @@ export const AI_BELEID: AiBeleid = {
       "reden": "gemeld in Roundbook; DPA bestaat, doorgifte niet nagemeten",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "lovable",
       "gegevens": "gezondheid",
       "status": "testfase",
-      "reden":
-        "testfase ZONDER onderbouwing: Lovable-DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging (FOO-228); nu nog terugval voor spraak en beeld in Foodie",
+      "reden": "testfase ZONDER onderbouwing: Lovable-DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging (FOO-228); nu nog terugval voor spraak en beeld in Foodie",
       "wie": "Peter",
       "datum": "2026-11-01",
       "herzien": "vóór commerciële lancering",
-      "bron": "panel 1 nov 2026, #1",
+      "bron": "panel 1 nov 2026, #1"
     },
     {
       "provider": "meta",
@@ -368,7 +366,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "beeldprompts voor artikels",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "meta",
@@ -377,7 +375,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Peters eigen beelden",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §3",
+      "bron": "ontwerp §3"
     },
     {
       "provider": "meta",
@@ -385,7 +383,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "uitgesloten",
       "reden": "niet beslist",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "meta",
@@ -393,7 +391,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "uitgesloten",
       "reden": "niet beslist",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "mistral",
@@ -402,7 +400,7 @@ export const AI_BELEID: AiBeleid = {
       "reden": "Eendje-vertalingen",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "ontwerp §1",
+      "bron": "ontwerp §1"
     },
     {
       "provider": "mistral",
@@ -410,7 +408,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "testfase",
       "reden": "niet gebruikt",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "mistral",
@@ -418,7 +416,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "uitgesloten",
       "reden": "niet beslist",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "mistral",
@@ -426,7 +424,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "uitgesloten",
       "reden": "niet beslist",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "huggingface",
@@ -434,7 +432,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "onderbouwd",
       "reden": "Tarifit-TTS van lesmateriaal",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "huggingface",
@@ -442,7 +440,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "onderbouwd",
       "reden": "eigen opnames",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "nebius",
@@ -450,7 +448,7 @@ export const AI_BELEID: AiBeleid = {
       "status": "onderbouwd",
       "reden": "embeddings",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "nebius",
@@ -458,122 +456,129 @@ export const AI_BELEID: AiBeleid = {
       "status": "onderbouwd",
       "reden": "Merlin-geheugen",
       "wie": "Peter",
-      "datum": "2026-11-01",
+      "datum": "2026-11-01"
     },
     {
       "provider": "deepseek",
       "gegevens": "persoon",
       "project": "shintaka",
       "status": "testfase",
-      "reden":
-        "Claude en DeepSeek toegelaten bij Shintaka, ook voor de Telegram-inhoud (salonnamen, voornamen)",
+      "reden": "Claude en DeepSeek toegelaten bij Shintaka, ook voor de Telegram-inhoud (salonnamen, voornamen)",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "Peter in de chat, 1 nov 2026",
+      "bron": "Peter in de chat, 1 nov 2026"
     },
     {
       "provider": "deepseek",
       "gegevens": "persoon",
       "project": "billara-klantmail",
       "status": "testfase",
-      "reden":
-        "Peter, 1 nov 2026: klantmail mag niet stilvallen als Claude uitvalt. DeepSeek enkel als terugval; Claude blijft vooraan door de projectvoorrang",
+      "reden": "Peter, 1 nov 2026: klantmail mag niet stilvallen als Claude uitvalt. DeepSeek enkel als terugval; Claude blijft vooraan door de projectvoorrang",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": 'Peter in de chat, 1 nov 2026 ("Ja en uitzondering")',
-      "grondslag":
-        "gerechtvaardigd belang (continuiteit van de dienst aan de klant); verwerkersvoorwaarden DeepSeek nog na te kijken (advocaatvragen 2.10-2.12)",
+      "bron": "Peter in de chat, 1 nov 2026 (\"Ja en uitzondering\")",
+      "grondslag": "gerechtvaardigd belang (continuiteit van de dienst aan de klant); verwerkersvoorwaarden DeepSeek nog na te kijken (advocaatvragen 2.10-2.12)",
       "geldig_tot": "2027-05-01",
       "toestemming_vereist": false,
-      "herzien":
-        "geldig_tot is een voorlopige datum, zoals bij de Foodie-toelating; herzien bij het advocaatadvies",
+      "herzien": "geldig_tot is een voorlopige datum, zoals bij de Foodie-toelating; herzien bij het advocaatadvies"
     },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "project": "billara-telefoon",
+      "status": "testfase",
+      "reden": "Peter, 1 nov 2026: de telefoonagent (Isabel) mag niet stilvallen als Claude uitvalt. DeepSeek enkel als terugval; Claude blijft vooraan door de projectvoorrang",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Peter in de chat, 1 nov 2026 (\"Yes, add exception\")",
+      "grondslag": "gerechtvaardigd belang (continuiteit van de dienst aan de beller); verwerkersvoorwaarden DeepSeek nog na te kijken (advocaatvragen 2.10-2.12)",
+      "geldig_tot": "2027-05-01",
+      "toestemming_vereist": false,
+      "herzien": "geldig_tot is een voorlopige datum, zoals bij de klantmail; herzien bij het advocaatadvies"
+    }
   ],
   "contexten": {
     "roundbook": {
-      "omschrijving":
-        "Verwerkersovereenkomst Roundbook (Eagle-Eye): berichten van Arend-Jan in Telegram met salonnamen en voornamen. Enkel providers uit de sub-verwerkerslijst.",
+      "omschrijving": "Verwerkersovereenkomst Roundbook (Eagle-Eye): berichten van Arend-Jan in Telegram met salonnamen en voornamen. Enkel providers uit de sub-verwerkerslijst.",
       "providers": [
         {
           "provider": "gemini",
           "gemeld_aan_klant": "2026-10-28",
-          "bron":
-            "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts",
+          "bron": "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts"
         },
         {
           "provider": "lovable",
           "gemeld_aan_klant": "2026-10-28",
-          "bron":
-            "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts",
-        },
-      ],
-    },
+          "bron": "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts"
+        }
+      ]
+    }
   },
   "projecten": {
     "foodie": {
-      "omschrijving":
-        "hapklik / foodieapp.eu: maaltijden, foto's, gewicht, coaching",
-      "gegevens": "gezondheid",
+      "omschrijving": "hapklik / foodieapp.eu: maaltijden, foto's, gewicht, coaching",
+      "gegevens": "gezondheid"
     },
     "eendje": {
       "omschrijving": "eendje.be: artikels, topics, vertalingen, beeld",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "billara": {
-      "omschrijving":
-        "Tickbook/Billara: Telegram-bot, meetings, klantberichten, Roundbook",
-      "gegevens": "persoon",
+      "omschrijving": "Tickbook/Billara: Telegram-bot, meetings, klantberichten, Roundbook",
+      "gegevens": "persoon"
     },
     "roundbook": {
       "omschrijving": "Roundbook-flows in Billara",
       "gegevens": "persoon",
-      "context": "roundbook",
+      "context": "roundbook"
     },
     "shintaka": {
-      "omschrijving":
-        "Shintaka-webshop: artikels, vertalingen (publiek); Telegram-flows geven gegevens persoon mee. Claude en DeepSeek toegelaten (Peter 1 nov 2026)",
-      "gegevens": "publiek",
+      "omschrijving": "Shintaka-webshop: artikels, vertalingen (publiek); Telegram-flows geven gegevens persoon mee. Claude en DeepSeek toegelaten (Peter 1 nov 2026)",
+      "gegevens": "publiek"
     },
     "ese": {
       "omschrijving": "ese-scissors.eu: artikels, vertalingen, sitetekst",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "sjabloon": {
       "omschrijving": "holie-site-sjabloon",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "phyllox": {
       "omschrijving": "Phyllox: moderatie van gebruikersinhoud, Telegram",
-      "gegevens": "persoon",
+      "gegevens": "persoon"
     },
     "holie": {
       "omschrijving": "holie.be",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "podcast": {
       "omschrijving": "podcast-analyse: duiden, wegen, groeperen",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "arrif": {
       "omschrijving": "arrif.app: woordenboek, bronnenscan",
-      "gegevens": "publiek",
+      "gegevens": "publiek"
     },
     "domus": {
       "omschrijving": "Domus: woningscore",
-      "gegevens": "prive-peter",
+      "gegevens": "prive-peter"
     },
     "vacatures": {
       "omschrijving": "VPS-vacaturescan",
-      "gegevens": "prive-peter",
+      "gegevens": "prive-peter"
     },
     "merlin": {
       "omschrijving": "Merlin (OpenClaw op de Pi)",
-      "gegevens": "prive-peter",
+      "gegevens": "prive-peter"
     },
     "billara-klantmail": {
-      "omschrijving":
-        "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
-      "gegevens": "persoon",
+      "omschrijving": "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+      "gegevens": "persoon"
     },
-  },
+    "billara-telefoon": {
+      "omschrijving": "Tickbook-telefoonagent (voice-ai.ts, Isabel): Claude gestreamd, DeepSeek als terugval",
+      "gegevens": "persoon"
+    }
+  }
 };
