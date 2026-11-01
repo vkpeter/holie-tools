@@ -4,7 +4,12 @@
  *
  *   deno run --allow-read --allow-write beleid/python/verwachting.ts
  */
-import { BeleidLeeg, type KeuzeVraag, kiesProviders, ondertekenBeleid } from "../../beleid.ts";
+import {
+  BeleidLeeg,
+  type KeuzeVraag,
+  kiesProviders,
+  ondertekenBeleid,
+} from "../../beleid.ts";
 import { AI_BELEID } from "../../ai-beleid.ts";
 
 const nu = new Date("2026-11-15T12:00:00Z");
@@ -19,7 +24,14 @@ const projecten = [
   "phyllox",
   "onbekend",
 ];
-const types = ["tekst", "tools", "beeld-in", "audio-in", "beeld-uit", "tts"] as const;
+const types = [
+  "tekst",
+  "tools",
+  "beeld-in",
+  "audio-in",
+  "beeld-uit",
+  "tts",
+] as const;
 const gegevens = [undefined, "publiek", "persoon", "gezondheid"] as const;
 
 const gevallen: unknown[] = [];
@@ -64,7 +76,9 @@ const sleutels = await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
 ]) as CryptoKeyPair;
 const pkcs8 = btoa(
   String.fromCharCode(
-    ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", sleutels.privateKey)),
+    ...new Uint8Array(
+      await crypto.subtle.exportKey("pkcs8", sleutels.privateKey),
+    ),
   ),
 );
 const publiek = btoa(

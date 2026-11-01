@@ -45,5 +45,7 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@1"
   },
-  "exclude": []
+  "exclude": [],
+  "fmt": { "exclude": ["beleid/python/verwachting.json"] },
+  "lint": { "exclude": ["beleid/python/"] }
 }
