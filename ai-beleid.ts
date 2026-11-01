@@ -11,8 +11,8 @@ import type { AiBeleid } from "./beleid.ts";
 
 export const AI_BELEID: AiBeleid = {
   "schema": 1,
-  "volgnummer": 5,
-  "uitgegeven": "2026-11-01T13:30:58Z",
+  "volgnummer": 6,
+  "uitgegeven": "2026-11-01T13:53:59Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
@@ -20,7 +20,8 @@ export const AI_BELEID: AiBeleid = {
       "capaciteiten": [
         "tekst",
         "tools",
-        "beeld-in"
+        "beeld-in",
+        "live-spraak"
       ],
       "aanroepbaar": true,
       "tier": "betalend tegoed; maandlimiet USD 100 in de Console",
@@ -152,6 +153,7 @@ export const AI_BELEID: AiBeleid = {
       "nebius"
     ],
     "live-spraak": [
+      "anthropic",
       "deepseek"
     ]
   },
@@ -186,7 +188,8 @@ export const AI_BELEID: AiBeleid = {
       "provider": "anthropic",
       "types": [
         "tekst",
-        "tools"
+        "tools",
+        "live-spraak"
       ],
       "project": "billara-telefoon",
       "van": "2026-11-01",

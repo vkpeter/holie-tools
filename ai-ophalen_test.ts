@@ -32,6 +32,9 @@ async function sleutelpaar() {
   };
 }
 
+/** Hoger dan de momentopname, zodat de opgehaalde versie wint. */
+const NIEUW = AI_BELEID.volgnummer + 1;
+
 function metVolgnummer(n: number, over: Partial<AiBeleid> = {}): AiBeleid {
   return { ...structuredClone(AI_BELEID), volgnummer: n, ...over };
 }
@@ -70,7 +73,7 @@ test(
   "haalt het ondertekende beleid op en meldt project en versie",
   async (urls, zet) => {
     const k = await sleutelpaar();
-    const env = await ondertekenBeleid(metVolgnummer(5), k.prive);
+    const env = await ondertekenBeleid(metVolgnummer(NIEUW), k.prive);
     zet(() => Promise.resolve(new Response(JSON.stringify(env))));
     stelAiBeleidIn({
       project: "foodie",
@@ -80,19 +83,19 @@ test(
     });
     const r = await huidigAiBeleid();
     assertEquals(r.bron, "beleidsadres");
-    assertEquals(r.beleid.volgnummer, 5);
+    assertEquals(r.beleid.volgnummer, NIEUW);
     assert(urls[0].startsWith(`${ADRES}?project=foodie&v=0.`));
     // Binnen 5 minuten: geen tweede ophaling.
     await huidigAiBeleid();
     assertEquals(urls.length, 1);
-    assertEquals(aiBeleidStatus().opgehaald?.volgnummer, 5);
+    assertEquals(aiBeleidStatus().opgehaald?.volgnummer, NIEUW);
   },
 );
 
 test("vervalste handtekening: momentopname", async (_urls, zet) => {
   const k = await sleutelpaar();
   const ander = await sleutelpaar();
-  const env = await ondertekenBeleid(metVolgnummer(5), ander.prive);
+  const env = await ondertekenBeleid(metVolgnummer(NIEUW), ander.prive);
   zet(() => Promise.resolve(new Response(JSON.stringify(env))));
   stelAiBeleidIn({
     project: "foodie",
@@ -109,8 +112,11 @@ test(
   "gewijzigde inhoud met de oude handtekening: momentopname",
   async (_urls, zet) => {
     const k = await sleutelpaar();
-    const env = await ondertekenBeleid(metVolgnummer(5), k.prive);
-    env.inhoud = env.inhoud.replace('"volgnummer":5', '"volgnummer":6');
+    const env = await ondertekenBeleid(metVolgnummer(NIEUW), k.prive);
+    env.inhoud = env.inhoud.replace(
+      `"volgnummer":${NIEUW}`,
+      `"volgnummer":${NIEUW + 1}`,
+    );
     zet(() => Promise.resolve(new Response(JSON.stringify(env))));
     stelAiBeleidIn({
       project: "foodie",
