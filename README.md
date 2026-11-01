@@ -108,6 +108,42 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.26.0 (ai): elke aanroep meldt zijn verbruik
+
+Fase D van het AI-beleid (ontwerp §7). `callAi`, `transcribeerAudio` en
+`genereerBeeld` melden na elke geslaagde of mislukte aanroep één regel aan de
+dagteller op `https://beleid.holie.be/verbruik` (Worker `holie-ai-beleid`, D1
+`holie-ai-verbruik`): dag (Europe/Brussels), project, provider, type, geschatte
+USD (`schatUsd`, ook mislukte pogingen met `usage`), terugval, zonder
+`gegevens`-label, fout. Tickbook haalt de teller dagelijks op
+(`ai_verbruik_dag`).
+
+- **Niets te doen in een project:** wie `stelAiBeleidIn({ project })` heeft,
+  meldt vanzelf. Geen sleutel nodig.
+- **Gebundeld en fire-and-forget:** één POST per proces of verzoek na
+  `VERBRUIK_BUNDEL_MS` (500 ms), harde timeout 2 s, stil bij elke fout. In een
+  Supabase edge function via `EdgeRuntime.waitUntil`; in een Cloudflare Worker
+  meteen (of `ctx.waitUntil(aiVerbruikVersturen())`).
+- **Uit:** `HOLIE_AI_VERBRUIK_URL=uit`, `stelAiBeleidIn({ verbruik: false })`,
+  en vanzelf als `HOLIE_AI_BELEID_URL=uit` (tests) of het beleid van een ander
+  adres komt. Zonder project wordt niets gemeld.
+- **Eigen providers** (Mistral in een eigen lus):
+  `meldAiVerbruik({ provider: "mistral", type: "tekst", usd, label: true })`.
+- **Python:** `meld_verbruik(project, provider, type_, usd)` en `schat_usd` in
+  `beleid/python/holie_ai_beleid.py` (py-1.1.0).
+
+| Wat                                                         | Waarvoor                                            |
+| ----------------------------------------------------------- | --------------------------------------------------- |
+| `meldAiVerbruik(melding)`                                   | één aanroep melden die het pakket niet zelf doet    |
+| `aiVerbruikVersturen()`                                     | de wachtrij nu versturen (Worker, script dat stopt) |
+| `aiVerbruikWachtrij()`, `wisAiVerbruik()`                   | diagnose en tests                                   |
+| `brusselseDag()`                                            | `YYYY-MM-DD` in Europe/Brussels                     |
+| `VERBRUIK_URL`, `VERBRUIK_BUNDEL_MS`, `VERBRUIK_TIMEOUT_MS` | adres en tijden                                     |
+
+⚠️ De teller onderschat (panel #7): Merlin, Claude Code en losse scripts die het
+pakket niet gebruiken, tellen niet mee; een model zonder regel in `TARIEVEN`
+telt als 0.
+
 ## Nieuw in 0.25.0: `./nieuwsbrief` en `sendMailBatch`
 
 Een nieuwsbrief die de regels van Gmail en Yahoo volgt en niemand twee keer

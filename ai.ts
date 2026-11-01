@@ -56,7 +56,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.25.2";
+export const PAKKET_VERSIE = "0.26.0";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -833,6 +833,8 @@ interface Instelling {
   /** Beleidsadres; `false` = niet ophalen (enkel momentopname). */
   url?: string | false;
   publiekeSleutel?: string;
+  /** Verbruiksadres; `false` = niets melden (sinds 0.26.0). */
+  verbruik?: string | false;
 }
 let ingesteld: Instelling = {};
 let gewaarschuwdZonderBeleid = false;
@@ -862,6 +864,9 @@ let laatstMislukt = 0;
  * een harde timeout. Lukt dat niet, dan de momentopname (panel #5); zonder momentopname het
  * strenge `NOODBELEID` uit het pakket. `url: false` (of `HOLIE_AI_BELEID_URL=uit`) haalt
  * niets op.
+ *
+ * Sinds 0.26.0 meldt het pakket ook het verbruik (zie `meldAiVerbruik`) aan
+ * `VERBRUIK_URL`; `verbruik: false` (of `HOLIE_AI_VERBRUIK_URL=uit`) zet dat uit.
  */
 export function stelAiBeleidIn(
   opties: {
@@ -869,6 +874,7 @@ export function stelAiBeleidIn(
     momentopname?: unknown;
     url?: string | false;
     publiekeSleutel?: string;
+    verbruik?: string | false;
   },
 ): void {
   ingesteld = {
@@ -878,6 +884,7 @@ export function stelAiBeleidIn(
       : valideerBeleid(opties.momentopname),
     url: opties.url,
     publiekeSleutel: opties.publiekeSleutel,
+    verbruik: opties.verbruik,
   };
   opgehaald = undefined;
   bezig = undefined;
@@ -1189,6 +1196,230 @@ async function kiesVoorAanroep(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Verbruik melden (sinds 0.26.0): ontwerp §7, fase D van het AI-beleid.
+// ---------------------------------------------------------------------------
+
+/** Waar het verbruik heen gaat: de beleids-Worker telt het per dag op (D1). */
+export const VERBRUIK_URL = "https://beleid.holie.be/verbruik";
+/** Zo lang verzamelt een proces meldingen voor het ze in één POST verstuurt. */
+export const VERBRUIK_BUNDEL_MS = 500;
+/** Harde timeout op de POST: een trage Worker mag niemand ophouden. */
+export const VERBRUIK_TIMEOUT_MS = 2000;
+/** Zoveel regels hoogstens per POST (de Worker weigert meer). */
+const VERBRUIK_MAX_REGELS = 50;
+
+/** Eén regel van de dagteller: per dag (Europe/Brussels), project, provider en type. */
+export interface VerbruikRegel {
+  /** `YYYY-MM-DD` in Europe/Brussels. */
+  dag: string;
+  project: string;
+  /** Technische sleutel (`anthropic`, `deepseek`, ...); `geen` als de aanroep faalde. */
+  provider: string;
+  type: string;
+  aanroepen: number;
+  /** Geschat met `schatUsd`; een onbekend model telt als 0. */
+  usd: number;
+  /** Aanroepen die niet bij de eerste provider van de keten uitkwamen. */
+  terugval: number;
+  /** Aanroepen zonder expliciete `gegevens` (de projectstandaard gold). */
+  zonder_label: number;
+  /** Aanroepen die uiteindelijk faalden. */
+  fouten: number;
+}
+
+const wachtrij = new Map<string, VerbruikRegel>();
+let verbruikTimer: ReturnType<typeof setTimeout> | undefined;
+let verbruikKlaar: (() => void) | undefined;
+let verbruikMicro = false;
+
+/** `YYYY-MM-DD` in Europe/Brussels. */
+export function brusselseDag(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Brussels",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/**
+ * Het verbruiksadres, of `undefined` (niets melden). Volgorde: `stelAiBeleidIn({ verbruik })`,
+ * dan `HOLIE_AI_VERBRUIK_URL` (`uit` = niets), dan `VERBRUIK_URL` maar ENKEL als het beleid van
+ * het standaardadres komt. Staat het beleidsadres uit (`HOLIE_AI_BELEID_URL=uit`, tests) of op
+ * een eigen adres, dan meldt het pakket niets: zo gaat er nooit een POST uit een test.
+ */
+function verbruiksadres(): string | undefined {
+  if (ingesteld.verbruik === false) return undefined;
+  if (typeof ingesteld.verbruik === "string") return ingesteld.verbruik;
+  const env = leesEnv("HOLIE_AI_VERBRUIK_URL");
+  if (env === "uit") return undefined;
+  if (env) return env;
+  return beleidsadres() === BELEID_URL ? VERBRUIK_URL : undefined;
+}
+
+/** Wat een aanroep meldt. */
+export interface VerbruikMelding {
+  /** Standaard het project van `stelAiBeleidIn` of `HOLIE_AI_PROJECT`. Zonder project: niets. */
+  project?: string;
+  provider: string;
+  type: AiType | string;
+  usd?: number;
+  terugval?: boolean;
+  /** Gaf de aanroep zelf `gegevens` mee? */
+  label?: boolean;
+  /** Faalde de aanroep? */
+  fout?: boolean;
+}
+
+/**
+ * Meldt één aanroep aan de dagteller. Gebundeld en fire-and-forget: de melding gaat in een
+ * wachtrij, één POST per proces of verzoek volgt na `VERBRUIK_BUNDEL_MS` (met
+ * `EdgeRuntime.waitUntil` in Supabase edge functions; in een Cloudflare Worker meteen, of geef
+ * `aiVerbruikVersturen()` aan `ctx.waitUntil`). Gooit nooit en wacht nergens op.
+ *
+ * `callAi`, `transcribeerAudio` en `genereerBeeld` melden zelf. Gebruik dit enkel voor een
+ * provider die het pakket niet aanspreekt (bv. Mistral in een eigen lus).
+ */
+export function meldAiVerbruik(melding: VerbruikMelding): void {
+  try {
+    const project = melding.project ?? aiProject();
+    if (!project) return;
+    const url = verbruiksadres();
+    if (!url) return;
+    const dag = brusselseDag();
+    const provider = String(melding.provider || "geen").replace(/-vision$/, "");
+    const type = String(melding.type || "tekst");
+    const sleutel = `${dag}|${project}|${provider}|${type}`;
+    const regel = wachtrij.get(sleutel) ?? {
+      dag,
+      project,
+      provider,
+      type,
+      aanroepen: 0,
+      usd: 0,
+      terugval: 0,
+      zonder_label: 0,
+      fouten: 0,
+    };
+    regel.aanroepen += 1;
+    const usd = Number(melding.usd ?? 0);
+    regel.usd += Number.isFinite(usd) && usd > 0 ? usd : 0;
+    if (melding.terugval) regel.terugval += 1;
+    if (!melding.label) regel.zonder_label += 1;
+    if (melding.fout) regel.fouten += 1;
+    wachtrij.set(sleutel, regel);
+    planVerbruik(url);
+  } catch {
+    // stil: verbruik melden mag nooit een aanroep laten falen
+  }
+}
+
+function planVerbruik(url: string): void {
+  const g = globalThis as {
+    EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void };
+    navigator?: { userAgent?: string };
+  };
+  const wacht = (p: Promise<void>) => {
+    try {
+      g.EdgeRuntime?.waitUntil?.(p);
+    } catch {
+      // geen waitUntil: de timer of microtaak volstaat
+    }
+  };
+  if (g.navigator?.userAgent === "Cloudflare-Workers") {
+    // Een Worker laat geen timers lopen na het antwoord: meteen versturen.
+    if (verbruikMicro) return;
+    verbruikMicro = true;
+    wacht(
+      Promise.resolve().then(() => {
+        verbruikMicro = false;
+        return verstuurVerbruik(url);
+      }).catch(() => {}),
+    );
+    return;
+  }
+  if (verbruikTimer !== undefined) return;
+  const klaar = new Promise<void>((r) => {
+    verbruikKlaar = r;
+  });
+  verbruikTimer = setTimeout(() => {
+    verbruikTimer = undefined;
+    const r = verbruikKlaar;
+    verbruikKlaar = undefined;
+    verstuurVerbruik(url).catch(() => {}).finally(() => r?.());
+  }, VERBRUIK_BUNDEL_MS);
+  wacht(klaar);
+}
+
+async function verstuurVerbruik(url: string): Promise<void> {
+  while (wachtrij.size > 0) {
+    const regels: VerbruikRegel[] = [];
+    for (const [k, r] of wachtrij) {
+      regels.push({ ...r, usd: Math.round(r.usd * 1e6) / 1e6 });
+      wachtrij.delete(k);
+      if (regels.length >= VERBRUIK_MAX_REGELS) break;
+    }
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ v: PAKKET_VERSIE, regels }),
+        signal: AbortSignal.timeout(VERBRUIK_TIMEOUT_MS),
+      });
+      await r.body?.cancel().catch(() => {});
+    } catch {
+      // stil: liever een gat in de teller dan een trage of falende aanroep
+    }
+  }
+}
+
+/**
+ * Verstuurt wat nog in de wachtrij zit, nu. Voor een Cloudflare Worker
+ * (`ctx.waitUntil(aiVerbruikVersturen())`) of een script dat meteen stopt. Gooit nooit.
+ */
+export async function aiVerbruikVersturen(): Promise<void> {
+  if (verbruikTimer !== undefined) {
+    clearTimeout(verbruikTimer);
+    verbruikTimer = undefined;
+  }
+  const klaar = verbruikKlaar;
+  verbruikKlaar = undefined;
+  try {
+    const url = verbruiksadres();
+    if (url) await verstuurVerbruik(url);
+    else wachtrij.clear();
+  } catch {
+    // stil
+  } finally {
+    klaar?.();
+  }
+}
+
+/** Wat nog niet verstuurd is (voor tests en diagnose). */
+export function aiVerbruikWachtrij(): VerbruikRegel[] {
+  return [...wachtrij.values()].map((r) => ({ ...r }));
+}
+
+/** Leegt de wachtrij zonder te versturen (tests). */
+export function wisAiVerbruik(): void {
+  if (verbruikTimer !== undefined) clearTimeout(verbruikTimer);
+  verbruikTimer = undefined;
+  verbruikKlaar?.();
+  verbruikKlaar = undefined;
+  wachtrij.clear();
+}
+
+/** De geschatte kost van een poging met `usage` (ook mislukte pogingen kosten geld). */
+function kostVan(model: string | undefined, usage: AiVerbruik | undefined) {
+  if (!model || !usage) return 0;
+  try {
+    return schatUsd(model, usage).usd;
+  } catch {
+    return 0;
+  }
+}
+
 async function roep(
   hook: AiOpties["bijSucces"],
   poging: AiPoging,
@@ -1227,6 +1458,40 @@ function combineerSignalen(
  *   de laatste fout in de melding.
  */
 export async function callAi(
+  messages: unknown[],
+  opties: AiOpties,
+): Promise<AiAntwoord> {
+  const project = aiProject(opties);
+  if (!project || !verbruiksadres()) return await callAiKern(messages, opties);
+  // Sinds 0.26.0: elke aanroep meldt één regel aan de dagteller (fire-and-forget).
+  const type: AiType = opties.type ??
+    (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
+  let usd = 0;
+  const label = opties.gegevens !== undefined;
+  try {
+    const a = await callAiKern(messages, {
+      ...opties,
+      bijFout: (p) => {
+        usd += kostVan(p.model, p.usage);
+        return opties.bijFout?.(p);
+      },
+    });
+    meldAiVerbruik({
+      project,
+      provider: a.provider,
+      type: a.type ?? type,
+      usd: usd + kostVan(a.model, a.usage),
+      terugval: !!a.terugval,
+      label,
+    });
+    return a;
+  } catch (e) {
+    meldAiVerbruik({ project, provider: "geen", type, usd, label, fout: true });
+    throw e;
+  }
+}
+
+async function callAiKern(
   messages: unknown[],
   opties: AiOpties,
 ): Promise<AiAntwoord> {
@@ -1637,6 +1902,30 @@ function audioSysteem(domein: string): string {
 export async function transcribeerAudio(
   opties: AudioOpties,
 ): Promise<AudioAntwoord> {
+  const project = aiProject(opties);
+  if (!project || !verbruiksadres()) return await transcribeerAudioKern(opties);
+  const type: AiType = opties.type ?? "audio-in";
+  const label = opties.gegevens !== undefined;
+  try {
+    const a = await transcribeerAudioKern(opties);
+    meldAiVerbruik({
+      project,
+      provider: a.provider,
+      type: a.type ?? type,
+      usd: kostVan(a.model, a.usage),
+      terugval: !!a.terugval,
+      label,
+    });
+    return a;
+  } catch (e) {
+    meldAiVerbruik({ project, provider: "geen", type, label, fout: true });
+    throw e;
+  }
+}
+
+async function transcribeerAudioKern(
+  opties: AudioOpties,
+): Promise<AudioAntwoord> {
   const video = isVideoFormaat(opties.formaat);
   if (
     !video &&
@@ -1989,6 +2278,30 @@ function beeldMime(bytes: Uint8Array, terugval: string): string {
  * Regel 1 blijft onverkort gelden, ook over providers heen.
  */
 export async function genereerBeeld(
+  opties: BeeldOpties,
+): Promise<BeeldAntwoord> {
+  const project = aiProject(opties);
+  if (!project || !verbruiksadres()) return await genereerBeeldKern(opties);
+  const type: AiType = opties.type ?? "beeld-uit";
+  const label = opties.gegevens !== undefined;
+  try {
+    const a = await genereerBeeldKern(opties);
+    meldAiVerbruik({
+      project,
+      provider: a.provider,
+      type: a.type ?? type,
+      usd: kostVan(a.model, a.usage ?? {}),
+      terugval: !!a.terugval,
+      label,
+    });
+    return a;
+  } catch (e) {
+    meldAiVerbruik({ project, provider: "geen", type, label, fout: true });
+    throw e;
+  }
+}
+
+async function genereerBeeldKern(
   opties: BeeldOpties,
 ): Promise<BeeldAntwoord> {
   const beeldKeuze = await kiesVoorAanroep(

@@ -8,12 +8,17 @@
  *   GET  /lezers                                     per project: pakketversie, volgnummer
  *                                                    en wanneer het laatst gelezen werd
  *   GET  /historie/<volgnummer>                      een ouder envelop
+ *   POST /verbruik                                   dagregels van @holie/tools (>= 0.26.0),
+ *                                                    opgeteld in D1; zonder geheim, begrensd
+ *   GET  /verbruik?van=&tot=                         de dagteller, enkel met
+ *                                                    `Authorization: Bearer <VERBRUIK_LEESSLEUTEL>`
  *
  * Er staat GEEN geheim in deze Worker: de handtekening is de schrijfsleutel. Wie de
  * privésleutel niet heeft, kan niets publiceren; een oud ondertekend bestand opnieuw
  * insturen faalt op het volgnummer.
  *
- * Bindings: KV `BELEID`, var `PUBLIEKE_SLEUTEL` (Ed25519, raw, base64).
+ * Bindings: KV `BELEID`, var `PUBLIEKE_SLEUTEL` (Ed25519, raw, base64), D1 `VERBRUIK`
+ * (schema in `verbruik.sql`), rate limit `VERBRUIK_LIMIET`, secret `VERBRUIK_LEESSLEUTEL`.
  */
 
 const JSON_KOP = { "content-type": "application/json; charset=utf-8" };
@@ -82,6 +87,172 @@ async function noteerLezer(env, project, versie, volgnummer) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Verbruik (fase D, 1 nov 2026): @holie/tools 0.26.0 meldt per proces een bundel dagregels.
+// Geen geheim nodig om te schrijven: projecten hebben geen sleutel. Vervalsen kan dus, maar
+// geeft hoogstens een vals alarm, nooit een lek. Daarom begrensd: grootte, plausibele waarden,
+// rate limit per IP en een plafond per project en dag. Lezen vraagt VERBRUIK_LEESSLEUTEL (VPS).
+// ---------------------------------------------------------------------------
+
+export const VERBRUIK_MAX_BYTES = 16 * 1024;
+export const VERBRUIK_MAX_REGELS = 50;
+/** Plafond per regel en per (dag, project, provider, type): daarboven telt niets meer bij. */
+export const VERBRUIK_MAX_USD_REGEL = 50;
+export const VERBRUIK_MAX_USD_DAG = 500;
+export const VERBRUIK_MAX_AANROEPEN_REGEL = 10000;
+const TYPES = new Set([
+  "tekst",
+  "tools",
+  "beeld-in",
+  "audio-in",
+  "beeld-uit",
+  "tts",
+  "embeddings",
+  "live-spraak",
+]);
+
+/** `YYYY-MM-DD` in Europe/Brussels, `dagen` verschoven. */
+export function brusselseDag(dagen = 0, nu = Date.now()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Brussels",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(nu + dagen * 86400000));
+}
+
+const geheelTussen = (x, min, max) =>
+  Number.isInteger(x) && x >= min && x <= max;
+
+/** Toetst één regel; geeft de foutreden of null. */
+export function regelFout(r, nu = Date.now()) {
+  if (!r || typeof r !== "object") return "regel is geen object";
+  if (typeof r.dag !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(r.dag)) {
+    return "dag";
+  }
+  if (r.dag < brusselseDag(-2, nu) || r.dag > brusselseDag(1, nu)) {
+    return "dag buiten venster";
+  }
+  if (typeof r.project !== "string" || !/^[a-z0-9-]{1,40}$/.test(r.project)) {
+    return "project";
+  }
+  if (
+    typeof r.provider !== "string" || !/^[a-z0-9-]{1,30}$/.test(r.provider)
+  ) return "provider";
+  if (!TYPES.has(r.type)) return "type";
+  if (!geheelTussen(r.aanroepen, 1, VERBRUIK_MAX_AANROEPEN_REGEL)) {
+    return "aanroepen";
+  }
+  if (
+    typeof r.usd !== "number" || !Number.isFinite(r.usd) || r.usd < 0 ||
+    r.usd > VERBRUIK_MAX_USD_REGEL
+  ) return "usd";
+  for (const veld of ["terugval", "zonder_label", "fouten"]) {
+    if (!geheelTussen(r[veld] ?? 0, 0, r.aanroepen)) return veld;
+  }
+  return null;
+}
+
+const UPSERT = `INSERT INTO verbruik
+  (dag, project, provider, type, aanroepen, usd, terugval, zonder_label, fouten, bijgewerkt)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+  ON CONFLICT (dag, project, provider, type) DO UPDATE SET
+    aanroepen = aanroepen + excluded.aanroepen,
+    usd = usd + excluded.usd,
+    terugval = terugval + excluded.terugval,
+    zonder_label = zonder_label + excluded.zonder_label,
+    fouten = fouten + excluded.fouten,
+    bijgewerkt = excluded.bijgewerkt
+  WHERE verbruik.usd + excluded.usd <= ${VERBRUIK_MAX_USD_DAG}
+    AND verbruik.aanroepen + excluded.aanroepen <= 1000000`;
+
+export async function ontvangVerbruik(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const lengte = Number(request.headers.get("content-length") || 0);
+  if (lengte > VERBRUIK_MAX_BYTES) return antwoord({ fout: "te groot" }, 413);
+  if (env.VERBRUIK_LIMIET) {
+    const ip = request.headers.get("cf-connecting-ip") || "onbekend";
+    const { success } = await env.VERBRUIK_LIMIET.limit({ key: ip });
+    if (!success) return antwoord({ fout: "te veel verzoeken" }, 429);
+  }
+  const tekst = await request.text();
+  if (tekst.length > VERBRUIK_MAX_BYTES) {
+    return antwoord({ fout: "te groot" }, 413);
+  }
+  let body;
+  try {
+    body = JSON.parse(tekst);
+  } catch {
+    return antwoord({ fout: "geen JSON" }, 400);
+  }
+  const regels = body?.regels;
+  if (
+    !Array.isArray(regels) || regels.length === 0 ||
+    regels.length > VERBRUIK_MAX_REGELS
+  ) return antwoord({ fout: "regels" }, 400);
+  const nu = Date.now();
+  for (const r of regels) {
+    const fout = regelFout(r, nu);
+    if (fout) return antwoord({ fout: `ongeldige regel: ${fout}` }, 400);
+  }
+  const tijd = new Date(nu).toISOString();
+  const stmt = env.VERBRUIK.prepare(UPSERT);
+  await env.VERBRUIK.batch(regels.map((r) =>
+    stmt.bind(
+      r.dag,
+      r.project,
+      r.provider,
+      r.type,
+      r.aanroepen,
+      r.usd,
+      r.terugval ?? 0,
+      r.zonder_label ?? 0,
+      r.fouten ?? 0,
+      tijd,
+    )
+  ));
+  return antwoord({ ok: true, regels: regels.length });
+}
+
+/** Tijdsonafhankelijke vergelijking van twee teksten. */
+async function gelijk(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let v = 0;
+  for (let i = 0; i < x.length; i++) v |= x[i] ^ y[i];
+  return v === 0;
+}
+
+export async function leesVerbruik(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const sleutel = env.VERBRUIK_LEESSLEUTEL;
+  const kop = request.headers.get("authorization") || "";
+  if (!sleutel || !kop.startsWith("Bearer ")) {
+    return antwoord({ fout: "niet toegelaten" }, 401);
+  }
+  if (!(await gelijk(kop.slice(7), sleutel))) {
+    return antwoord({ fout: "niet toegelaten" }, 401);
+  }
+  const url = new URL(request.url);
+  const van = url.searchParams.get("van") || brusselseDag(-35);
+  const tot = url.searchParams.get("tot") || brusselseDag(1);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot)) {
+    return antwoord({ fout: "van/tot als YYYY-MM-DD" }, 400);
+  }
+  const { results } = await env.VERBRUIK.prepare(
+    `SELECT dag, project, provider, type, aanroepen, usd, terugval, zonder_label, fouten, bijgewerkt
+       FROM verbruik WHERE dag >= ?1 AND dag <= ?2
+       ORDER BY dag, project, provider, type LIMIT 5000`,
+  ).bind(van, tot).all();
+  return antwoord({ van, tot, regels: results ?? [] }, 200, {
+    "cache-control": "no-store",
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -91,7 +262,7 @@ export default {
       return new Response(null, {
         headers: {
           "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET, PUT",
+          "access-control-allow-methods": "GET, PUT, POST",
           "access-control-allow-headers": "content-type",
         },
       });
@@ -159,10 +330,22 @@ export default {
       return w ? antwoord(w) : antwoord({ fout: "onbekend volgnummer" }, 404);
     }
 
+    if (pad === "/verbruik" && request.method === "POST") {
+      return await ontvangVerbruik(request, env);
+    }
+    if (pad === "/verbruik" && request.method === "GET") {
+      return await leesVerbruik(request, env);
+    }
+
     if (pad === "/") {
       return antwoord({
         dienst: "holie-ai-beleid",
-        paden: ["/ai-beleid.json", "/lezers", "/historie/<volgnummer>"],
+        paden: [
+          "/ai-beleid.json",
+          "/lezers",
+          "/historie/<volgnummer>",
+          "/verbruik",
+        ],
       });
     }
     return antwoord({ fout: "niet gevonden" }, 404);

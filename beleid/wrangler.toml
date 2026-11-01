@@ -15,3 +15,17 @@ id = "e61037c2d76346b0b7a0592acaa9dd6e"
 # Ed25519, raw, base64. De privésleutel staat in de Windows-gebruikersomgeving als
 # HOLIE_AI_BELEID_SLEUTEL (en later bij Tickbook), nooit hier.
 PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="
+
+# Verbruik (fase D, 1 nov 2026): de dagteller van @holie/tools >= 0.26.0 (POST /verbruik).
+# Schema: verbruik.sql. Leessleutel: `npx wrangler@4 secret put VERBRUIK_LEESSLEUTEL` (staat ook
+# op de VPS in /etc/holie/ai-verbruik.env, voor de taak holie-ai-verbruik).
+[[d1_databases]]
+binding = "VERBRUIK"
+database_name = "holie-ai-verbruik"
+database_id = "b0be8faa-b641-4e98-82cb-8738b0554bb5"
+
+# Per IP hoogstens 300 meldingen per minuut (een edge function stuurt er één per verzoek).
+[[ratelimits]]
+name = "VERBRUIK_LIMIET"
+namespace_id = "4101"
+simple = { limit = 300, period = 60 }

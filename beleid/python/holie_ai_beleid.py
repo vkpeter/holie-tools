@@ -35,7 +35,7 @@ from typing import Callable, Iterable
 
 BELEID_URL = "https://beleid.holie.be/ai-beleid.json"
 BELEID_PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="
-PAKKET_VERSIE = "py-1.0.0"
+PAKKET_VERSIE = "py-1.1.0"
 VERS_S = 5 * 60
 MAX_S = 24 * 60 * 60
 
@@ -400,3 +400,72 @@ def huidig_beleid(project: str | None = None, *, url: str | None = None,
     if gecached and time.time() - sinds < MAX_S:
         return gecached
     return NOODBELEID
+
+
+# ---------------------------------------------------------------------------------------------
+# Verbruik melden (fase D, 1 nov 2026): dezelfde dagteller als @holie/tools >= 0.26.0.
+# ---------------------------------------------------------------------------------------------
+
+VERBRUIK_URL = "https://beleid.holie.be/verbruik"
+
+# Prijs per token in USD, cache miss, zoals TARIEVEN in ai.ts (afgelezen, niet geschat). Een model
+# dat hier niet staat, telt als 0: liever een zichtbaar gat dan een verzonnen bedrag.
+TARIEVEN = {
+    "deepseek-v4-flash": (0.27 / 1_000_000, 1.10 / 1_000_000),
+    "deepseek-chat": (0.27 / 1_000_000, 1.10 / 1_000_000),
+    "claude-haiku-5-5": (0.10 / 1_000_000, 0.50 / 1_000_000),
+    "claude-sonnet-5-5": (2 / 1_000_000, 10 / 1_000_000),
+    "claude-sonnet-5": (2 / 1_000_000, 10 / 1_000_000),
+    "claude-sonnet-4-6": (3 / 1_000_000, 15 / 1_000_000),
+    "claude-opus-5-5": (4 / 1_000_000, 20 / 1_000_000),
+    "claude-opus-5": (5 / 1_000_000, 25 / 1_000_000),
+    "claude-opus-4-8": (5 / 1_000_000, 25 / 1_000_000),
+}
+
+
+def schat_usd(model: str, usage: dict | None) -> float:
+    """Tokens naar dollar; OpenAI-vorm (prompt/completion) of Anthropic-vorm (input/output)."""
+    tarief = TARIEVEN.get(model or "")
+    if not tarief or not usage:
+        return 0.0
+    i = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
+    o = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
+    return float(i) * tarief[0] + float(o) * tarief[1]
+
+
+def _brusselse_dag() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Brussels")).strftime("%Y-%m-%d")
+    except Exception:  # geen tzdata: UTC is hoogstens een paar uur ernaast
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def meld_verbruik(project: str, provider: str, type_: str = "tekst", usd: float = 0.0, *,
+                  terugval: bool = False, label: bool = True, fout: bool = False,
+                  url: str | None = None, timeout: float = 2.0) -> bool:
+    """Meldt één aanroep aan de dagteller (POST /verbruik). Gooit nooit; geeft True als de
+    Worker het aanvaardde. `label` = de aanroep gaf zelf `gegevens` mee. Uit met
+    HOLIE_AI_VERBRUIK_URL=uit of HOLIE_AI_BELEID_URL=uit (tests)."""
+    try:
+        adres = url or os.environ.get("HOLIE_AI_VERBRUIK_URL") or VERBRUIK_URL
+        if adres == "uit" or (not url and os.environ.get("HOLIE_AI_BELEID_URL") == "uit"):
+            return False
+        bedrag = float(usd or 0)
+        if not (bedrag >= 0 and bedrag < 1e9):
+            bedrag = 0.0
+        regel = {
+            "dag": _brusselse_dag(), "project": project,
+            "provider": re.sub(r"-vision$", "", provider or "geen"), "type": type_ or "tekst",
+            "aanroepen": 1, "usd": round(bedrag, 6), "terugval": int(bool(terugval)),
+            "zonder_label": int(not label), "fouten": int(bool(fout)),
+        }
+        data = json.dumps({"v": PAKKET_VERSIE, "regels": [regel]}).encode("utf-8")
+        verzoek = urllib.request.Request(adres, data=data, method="POST", headers={
+            "content-type": "application/json",
+            "user-agent": f"holie-ai-beleid/{PAKKET_VERSIE}",
+        })
+        with urllib.request.urlopen(verzoek, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
