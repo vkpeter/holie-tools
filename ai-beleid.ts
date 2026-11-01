@@ -11,8 +11,8 @@ import type { AiBeleid } from "./beleid.ts";
 
 export const AI_BELEID: AiBeleid = {
   "schema": 1,
-  "volgnummer": 3,
-  "uitgegeven": "2026-11-01T11:11:29Z",
+  "volgnummer": 4,
+  "uitgegeven": "2026-11-01T11:23:33Z",
   "standaard_gegevens": "persoon",
   "providers": {
     "anthropic": {
@@ -477,10 +477,16 @@ export const AI_BELEID: AiBeleid = {
       "project": "billara-klantmail",
       "status": "testfase",
       "reden":
-        "enkel als terugval wanneer Claude er niet is, voor de continuiteit van de klantmail; Claude blijft vooraan door de projectvoorrang",
+        "Peter, 1 nov 2026: klantmail mag niet stilvallen als Claude uitvalt. DeepSeek enkel als terugval; Claude blijft vooraan door de projectvoorrang",
       "wie": "Peter",
       "datum": "2026-11-01",
-      "bron": "Peter in de chat, 1 nov 2026",
+      "bron": 'Peter in de chat, 1 nov 2026 ("Ja en uitzondering")',
+      "grondslag":
+        "gerechtvaardigd belang (continuiteit van de dienst aan de klant); verwerkersvoorwaarden DeepSeek nog na te kijken (advocaatvragen 2.10-2.12)",
+      "geldig_tot": "2027-05-01",
+      "toestemming_vereist": false,
+      "herzien":
+        "geldig_tot is een voorlopige datum, zoals bij de Foodie-toelating; herzien bij het advocaatadvies",
     },
   ],
   "contexten": {
