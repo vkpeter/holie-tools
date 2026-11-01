@@ -10,6 +10,7 @@ import {
   callAi,
   genereerBeeld,
   isTegoedFout,
+  kiesAiVolgorde,
   stelAiBeleidIn,
   transcribeerAudio,
   wisTegoedCache,
@@ -272,3 +273,50 @@ test(
     assert(urls[0].includes("anthropic"));
   },
 );
+
+test("kiesAiVolgorde: Eendje met Mistral in de eigen lus", async (urls) => {
+  stelAiBeleidIn({ project: "eendje", momentopname: AI_BELEID });
+  const r = await kiesAiVolgorde("tekst", {
+    sleutels: alle,
+    volgorde: ["anthropic", "deepseek", "gemini", "lovable", "mistral"],
+    pakket: ["anthropic", "deepseek", "gemini", "lovable", "mistral"],
+    heeftSleutel: (p) => p === "mistral" ? true : undefined,
+  });
+  // Voorrang zet Claude vooraan; Mistral (publiek, onderbouwd) blijft erin.
+  assertEquals(r.volgorde[0], "anthropic");
+  assert(r.volgorde.includes("mistral"));
+  assertEquals(urls.length, 0);
+});
+
+test("kiesAiVolgorde: persoonsgegevens sluiten Mistral en DeepSeek uit", async () => {
+  stelAiBeleidIn({ project: "eendje", momentopname: AI_BELEID });
+  const r = await kiesAiVolgorde("tekst", {
+    sleutels: alle,
+    gegevens: "persoon",
+    pakket: ["anthropic", "deepseek", "gemini", "lovable", "mistral"],
+    heeftSleutel: (p) => p === "mistral" ? true : undefined,
+  });
+  assert(!r.volgorde.includes("mistral"));
+  assert(!r.volgorde.includes("deepseek"));
+});
+
+test("kiesAiVolgorde zonder project: opgegeven volgorde min wie geen sleutel heeft", async () => {
+  const r = await kiesAiVolgorde("tekst", {
+    sleutels: { deepseek: "t-d" },
+    volgorde: ["anthropic", "deepseek"],
+  });
+  assertEquals(r.volgorde, ["deepseek"]);
+  assertEquals(r.uitslag, undefined);
+});
+
+test("kiesAiVolgorde: niets over geeft een AiBeleidFout", async () => {
+  stelAiBeleidIn({ project: "billara", momentopname: AI_BELEID });
+  await assertRejects(
+    () =>
+      kiesAiVolgorde("tekst", {
+        sleutels: { deepseek: "t-d" },
+        volgorde: ["deepseek"],
+      }),
+    AiBeleidFout,
+  );
+});

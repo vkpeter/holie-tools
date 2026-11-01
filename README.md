@@ -108,6 +108,15 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.24.0 (ai): `kiesAiVolgorde`
+
+Voor code die zelf over providers loopt, of een provider aanspreekt die dit
+pakket niet kent (Mistral bij de Eendje-vertaling):
+`kiesAiVolgorde(type, opties)` geeft de volgorde die het beleid kiest, zonder
+iets aan te roepen. `pakket` zegt wat de aanroeper zelf kan, `heeftSleutel`
+toetst sleutels die niet in `SLEUTEL_VAR` staan. Gooit een `AiBeleidFout` als er
+niets overblijft.
+
 ## Nieuw in 0.23.0 (ai): het beleid komt van een ondertekend adres
 
 Onder beleid haalt het pakket het beleid op bij

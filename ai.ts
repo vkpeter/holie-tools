@@ -56,7 +56,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.23.0";
+export const PAKKET_VERSIE = "0.24.0";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -1043,6 +1043,82 @@ export function wisTegoedCache(): void {
 interface Keuze {
   volgorde: AiProvider[];
   uitslag?: KeuzeUitslag;
+}
+
+/**
+ * De volgorde die het beleid kiest, zonder iets aan te roepen. Voor code die zelf over
+ * providers loopt (een eigen lus met `volgorde: [provider]`, of een provider die dit pakket
+ * niet aanspreekt, zoals Mistral):
+ *
+ * ```ts
+ * const { volgorde } = await kiesAiVolgorde("tekst", {
+ *   volgorde: ["anthropic", "deepseek", "gemini", "lovable", "mistral"],
+ *   pakket: ["anthropic", "deepseek", "gemini", "lovable", "mistral"],
+ *   heeftSleutel: (p) => p === "mistral" ? !!Deno.env.get("MISTRAL_API_KEY") : undefined,
+ * });
+ * ```
+ *
+ * Zonder project (niet onder beleid): de opgegeven volgorde, zonder providers zonder
+ * sleutel of met een opgebruikt tegoed. Gooit een `AiBeleidFout` als er niets overblijft.
+ */
+export async function kiesAiVolgorde(
+  type: AiType,
+  opties: BeleidOpties & {
+    label?: string;
+    /** Kandidaten en hun basisvolgorde; zonder opgave de basis uit het beleid. */
+    volgorde?: readonly string[];
+    /** Wat de aanroeper zelf kan aanspreken. Standaard wat dit pakket voor het type kan. */
+    pakket?: readonly string[];
+    sleutels?: Partial<Record<AiProvider, string>>;
+    /** Eigen sleuteltoets; `undefined` = de gewone (omgeving of `sleutels`). */
+    heeftSleutel?: (provider: string) => boolean | undefined;
+  },
+): Promise<{ volgorde: string[]; uitslag?: KeuzeUitslag }> {
+  const standaardPakket: Record<string, readonly AiProvider[]> = {
+    tekst: CHAT_PROVIDERS,
+    tools: CHAT_PROVIDERS,
+    "beeld-in": CHAT_PROVIDERS,
+    "audio-in": AUDIO_PROVIDERS,
+    "beeld-uit": BEELD_PROVIDERS,
+  };
+  const pakket = opties.pakket ?? standaardPakket[type] ?? [];
+  const sleutelVan = (p: string) => {
+    const eigen = opties.heeftSleutel?.(p);
+    if (eigen !== undefined) return eigen;
+    return p in SLEUTEL_VAR && !!leesSleutel(p as AiProvider, opties);
+  };
+  const tegoed = (p: string) =>
+    p in SLEUTEL_VAR && isTegoedOp(p, leesSleutel(p as AiProvider, opties));
+  const project = aiProject(opties);
+  const label = opties.label ?? "kiesAiVolgorde";
+  if (!project) {
+    const volgorde = (opties.volgorde ?? pakket).filter((p) =>
+      sleutelVan(p) && !tegoed(p)
+    );
+    return { volgorde };
+  }
+  const { beleid, bron } = await huidigAiBeleid(project);
+  try {
+    const uitslag = kiesProviders(beleid, {
+      type,
+      project,
+      gegevens: opties.gegevens,
+      context: opties.context,
+      vast: opties.vast,
+      volgorde: opties.volgorde,
+      toestemming: opties.toestemming,
+      pakket,
+      heeftSleutel: sleutelVan,
+      tegoedOp: tegoed,
+    });
+    for (const w of uitslag.waarschuwingen) {
+      console.warn(`[ai:${label}] beleid (${bron}): ${w}`);
+    }
+    return { volgorde: uitslag.volgorde, uitslag };
+  } catch (e) {
+    if (e instanceof BeleidLeeg) throw new AiBeleidFout(e);
+    throw e;
+  }
 }
 
 /**
