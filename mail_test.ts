@@ -1,5 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
-import { MAIL_MAX_ONTVANGERS, sendMail } from "./mail.ts";
+import {
+  MAIL_BATCH_MAX,
+  MAIL_MAX_ONTVANGERS,
+  sendMail,
+  sendMailBatch,
+} from "./mail.ts";
 
 // Verzonnen waarden: nooit een echte sleutel of echt adres in dit pakket.
 const SLEUTEL = "re_TEST_sleutel_niet_echt";
@@ -210,5 +215,117 @@ Deno.test("apiBasis voor tests", async () => {
     assertEquals(m.aanroepen[0].url, "http://localhost:9/emails");
   } finally {
     m.herstel();
+  }
+});
+
+// ───────────── koppen en batch (0.25.0) ─────────────
+
+Deno.test("sendMail: extra koppen gaan mee, kop met regeleinde wordt geweigerd", async () => {
+  const { aanroepen, herstel } = metAntwoord({});
+  try {
+    const r = await sendMail({
+      ...basis,
+      headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+    });
+    assert(r.ok);
+    assertEquals(aanroepen[0].body.headers, {
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+    const slecht = await sendMail({
+      ...basis,
+      headers: { "X-Test": "a\r\nBcc: x@example.com" },
+    });
+    assertEquals(slecht.ok, false);
+    assertEquals(aanroepen.length, 1);
+  } finally {
+    herstel();
+  }
+});
+
+Deno.test("sendMailBatch: per mail een eigen to, koppen en idempotentiesleutel", async () => {
+  const { aanroepen, herstel } = metAntwoord({
+    body: '{"data":[{"id":"m1"},{"id":"m2"}]}',
+  });
+  try {
+    const r = await sendMailBatch({
+      apiKey: SLEUTEL,
+      idempotencyKey: "digest:abc/0",
+      mails: [
+        {
+          from: basis.from,
+          to: "a@example.com",
+          subject: "S",
+          html: "<p>1</p>",
+          headers: { "X-A": "1" },
+        },
+        {
+          from: basis.from,
+          to: "b@example.com",
+          subject: "S",
+          html: "<p>2</p>",
+        },
+      ],
+    });
+    assert(r.ok);
+    assertEquals(r.ids, ["m1", "m2"]);
+    assert(aanroepen[0].url.endsWith("/emails/batch"));
+    assertEquals(aanroepen[0].headers.get("Idempotency-Key"), "digest:abc/0");
+    const lijstBody = aanroepen[0].body as unknown as Record<string, unknown>[];
+    assertEquals(lijstBody[0].to, ["a@example.com"]);
+    assertEquals(lijstBody[0].headers, { "X-A": "1" });
+    assertEquals(lijstBody[1].headers, undefined);
+  } finally {
+    herstel();
+  }
+});
+
+Deno.test("sendMailBatch: weigert leeg, te veel en een ongeldige mail zonder verzoek", async () => {
+  const { aanroepen, herstel } = metAntwoord({});
+  try {
+    assertEquals(
+      (await sendMailBatch({ apiKey: SLEUTEL, mails: [] })).ok,
+      false,
+    );
+    const veel = Array.from({ length: MAIL_BATCH_MAX + 1 }, () => ({
+      from: basis.from,
+      to: "a@example.com",
+      subject: "S",
+      html: "",
+    }));
+    assertEquals(
+      (await sendMailBatch({ apiKey: SLEUTEL, mails: veel })).ok,
+      false,
+    );
+    const r = await sendMailBatch({
+      apiKey: SLEUTEL,
+      mails: [{ from: basis.from, to: [], subject: "S", html: "" }],
+    });
+    assertEquals(r.fout, "mail 0: geen ontvanger (to)");
+    assertEquals(aanroepen.length, 0);
+  } finally {
+    herstel();
+  }
+});
+
+Deno.test("sendMailBatch: fout van Resend zonder sleutel in de melding", async () => {
+  const { herstel } = metAntwoord({
+    status: 422,
+    body: `{"name":"validation_error","message":"slecht ${SLEUTEL}"}`,
+  });
+  try {
+    const r = await sendMailBatch({
+      apiKey: SLEUTEL,
+      mails: [{
+        from: basis.from,
+        to: "a@example.com",
+        subject: "S",
+        html: "",
+      }],
+    });
+    assertEquals(r.ok, false);
+    assertEquals(r.status, 422);
+    assert(!r.fout?.includes(SLEUTEL));
+  } finally {
+    herstel();
   }
 });

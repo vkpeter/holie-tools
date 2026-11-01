@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -15,7 +15,8 @@
     "./formulier": "./formulier.ts",
     "./codes": "./codes.ts",
     "./beleid": "./beleid.ts",
-    "./ai-beleid": "./ai-beleid.ts"
+    "./ai-beleid": "./ai-beleid.ts",
+    "./nieuwsbrief": "./nieuwsbrief.ts"
   },
   "publish": {
     "include": [
@@ -32,7 +33,9 @@
       "ics.ts",
       "formulier.ts",
       "codes.ts",
+      "nieuwsbrief.ts",
       "sql/rate_limit_hit.sql",
+      "sql/nieuwsbrief.sql",
       "README.md",
       "LICENSE"
     ]

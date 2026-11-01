@@ -108,6 +108,29 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.25.0: `./nieuwsbrief` en `sendMailBatch`
+
+Een nieuwsbrief die de regels van Gmail en Yahoo volgt en niemand twee keer mailt.
+
+| Wat | Waar | Waarvoor |
+|---|---|---|
+| `uitschrijfKoppen(url, { mailto? })` | `./nieuwsbrief` | `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058): de mailclient toont een eigen uitschrijfknop |
+| `isOneClickUitschrijving(type, body)` | `./nieuwsbrief` | herkent de POST `List-Unsubscribe=One-Click` van die knop |
+| `uitgaveSleutel(soort, delen)` | `./nieuwsbrief` | vaste sleutel per uitgave, voor het verzendregister en de `Idempotency-Key` |
+| `verdeelInBatches(items, 100)` | `./nieuwsbrief` | stukken van 100, de batchgrens van Resend |
+| `verwerkResendWebhook(req, geheim)` | `./nieuwsbrief` | Svix-handtekening controleren; `soort` = `bounce` (enkel Permanent), `klacht` of `andere` |
+| `sendMailBatch({ apiKey, mails, idempotencyKey })` | `./mail` | tot 100 mails per verzoek, elk met een eigen `to` en eigen koppen |
+| `headers` | `./mail` (`sendMail`) | extra mailkoppen; een regeleinde in naam of waarde wordt geweigerd |
+| `sql/nieuwsbrief.sql` | SQL | `nieuwsbrief_claim` / `nieuwsbrief_vrijgeven` (verzendregister) en `nieuwsbrief_onderdruk` (bounce en klacht, als sha256) |
+
+Regels die erbij horen:
+- **Uitschrijflink met een id, niet met het adres**, en de code uit `maakUitschrijfcode(geheim, "nieuwsbrief", id)`:
+  geen persoonsgegeven in de URL, geen token te bewaren.
+- **Uitschrijfpagina schrijft pas uit na een klik** (POST). Mailscanners openen elke link, ook die.
+- **Verzenden:** `nieuwsbrief_claim(uitgave, ids)` geeft enkel wie deze uitgave nog niet kreeg; mislukt een
+  batch, dan `nieuwsbrief_vrijgeven` voor die batch. Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
+- Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
+
 ## Nieuw in 0.24.0 (ai): `kiesAiVolgorde`
 
 Voor code die zelf over providers loopt, of een provider aanspreekt die dit
