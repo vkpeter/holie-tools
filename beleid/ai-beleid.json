@@ -1,0 +1,443 @@
+{
+  "schema": 1,
+  "volgnummer": 1,
+  "uitgegeven": "2026-11-01T18:00:00Z",
+  "standaard_gegevens": "persoon",
+  "providers": {
+    "anthropic": {
+      "naam": "Claude (Anthropic API)",
+      "capaciteiten": ["tekst", "tools", "beeld-in"],
+      "aanroepbaar": true,
+      "tier": "betalend tegoed; maandlimiet USD 100 in de Console",
+      "dataprofiel": {
+        "regio": "VS",
+        "dpa": "onbekend",
+        "scc": "onbekend",
+        "training": "onbekend",
+        "bron": "niet nagemeten; FOO-228 vermeldt Anthropic enkel terloops (panel 1 nov 2026, #2)"
+      }
+    },
+    "deepseek": {
+      "naam": "DeepSeek",
+      "capaciteiten": ["tekst", "tools", "beeld-in", "live-spraak"],
+      "aanroepbaar": true,
+      "dataprofiel": {
+        "regio": "China",
+        "dpa": "onbekend",
+        "scc": "nee",
+        "training": "onbekend",
+        "bron": "AVG-panel Roundbook 28 okt 2026: geen adequaatheidsbesluit, geen SCC; advocaatvragen 2.10-2.12"
+      }
+    },
+    "gemini": {
+      "naam": "Gemini (Google, gratis API)",
+      "capaciteiten": ["tekst", "tools", "beeld-in", "audio-in"],
+      "aanroepbaar": true,
+      "tier": "gratis: dagquotum per Google-project; beeld-uit quotum nul (429, 19 sep 2026); beeld-in niet apart nagemeten",
+      "dataprofiel": {
+        "regio": "VS",
+        "dpa": "onbekend",
+        "training": "nee",
+        "bron": "ai.google.dev/gemini-api/terms, 19 sep 2026: in de EER gelden de betaalvoorwaarden (geen training); FOO-228: 'geen gevoelige info'"
+      }
+    },
+    "lovable": {
+      "naam": "Lovable AI-gateway",
+      "capaciteiten": ["tekst", "tools", "beeld-in", "audio-in", "beeld-uit"],
+      "aanroepbaar": true,
+      "dataprofiel": {
+        "dpa": "ja",
+        "bewaartermijn": "90 dagen prompt-logging",
+        "bron": "FOO-228: DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging"
+      }
+    },
+    "meta": {
+      "naam": "Meta Model API (Muse Image)",
+      "capaciteiten": ["beeld-uit"],
+      "aanroepbaar": true
+    },
+    "mistral": {
+      "naam": "Mistral",
+      "capaciteiten": ["tekst"],
+      "aanroepbaar": false,
+      "tier": "enkel Eendje-vertaling, eigen code; niet aanroepbaar via @holie/tools",
+      "dataprofiel": { "regio": "EU", "bron": "niet nagemeten" }
+    },
+    "huggingface": {
+      "naam": "Hugging Face",
+      "capaciteiten": ["tts"],
+      "aanroepbaar": false,
+      "tier": "Tarifit-TTS en pyannote, eigen scripts"
+    },
+    "nebius": {
+      "naam": "Nebius",
+      "capaciteiten": ["embeddings"],
+      "aanroepbaar": false,
+      "tier": "embeddings van Merlin (OpenClaw)"
+    }
+  },
+  "basis": {
+    "tekst": ["deepseek", "gemini", "anthropic", "lovable"],
+    "tools": ["deepseek", "gemini", "anthropic", "lovable"],
+    "beeld-in": ["deepseek", "gemini", "anthropic", "lovable"],
+    "audio-in": ["gemini", "lovable"],
+    "beeld-uit": ["meta", "lovable"],
+    "tts": ["huggingface"],
+    "embeddings": ["nebius"],
+    "live-spraak": ["deepseek"]
+  },
+  "voorrang": [
+    {
+      "provider": "anthropic",
+      "types": ["tekst", "tools", "beeld-in"],
+      "van": "2026-10-28",
+      "tot": "2027-01-31",
+      "reden": "Claude-tegoed USD 251 (Console, 1 nov 2026), maandlimiet USD 100: ruwweg tot eind januari. Eerder op = 400 'credit balance' en de negatieve cache slaat Claude 10 min over.",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "Projecten/AI-providervolgorde - audit en centrale schakelaar (1 nov 2026)"
+    }
+  ],
+  "toelatingen": [
+    {
+      "provider": "anthropic",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "openbare tekst, geen persoonsgegevens",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "anthropic",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Peters eigen gegevens, eigen keuze",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "anthropic",
+      "gegevens": "persoon",
+      "status": "testfase",
+      "reden": "ja buiten de verwerkerscontext Roundbook; DPA en doorgiftegrond niet nagemeten",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "herzien": "na nameting Anthropic-DPA",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "anthropic",
+      "gegevens": "gezondheid",
+      "status": "testfase",
+      "reden": "Claude staat sinds 28 okt eerst voor Foodie, maar Anthropic staat niet in verwerkersdossier FOO-228 (DPA, doorgiftegrond, bewaartermijn niet nagemeten)",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "herzien": "na nameting Anthropic-DPA, vóór commerciële lancering",
+      "bron": "panel 1 nov 2026, #2"
+    },
+
+    {
+      "provider": "deepseek",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "openbare tekst",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Peters eigen gegevens, eigen keuze",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "persoon",
+      "status": "uitgesloten",
+      "reden": "China, geen adequaatheidsbesluit, geen SCC (Roundbook: DeepSeek uit de bot)",
+      "wie": "Peter",
+      "datum": "2026-10-28",
+      "bron": "AVG-panel Roundbook 28 okt 2026, punt 6"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "gezondheid",
+      "status": "uitgesloten",
+      "reden": "bijzondere categorie, geen afspraak met DeepSeek",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "deepseek",
+      "gegevens": "gezondheid",
+      "project": "foodie",
+      "status": "testfase",
+      "reden": "bewust aanvaard voor Foodie in de testfase",
+      "grondslag": "nog vast te leggen (advocaatvragen 2.10-2.12)",
+      "geldig_tot": "2027-05-01",
+      "toestemming_vereist": false,
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "herzien": "commerciële lancering; geldig_tot is een voorlopige datum zolang de lancering niet gepland is",
+      "bron": "Peter 1 nov 2026; panel #4"
+    },
+
+    {
+      "provider": "gemini",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "openbare tekst",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "gemini",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Peters eigen gegevens",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "gemini",
+      "gegevens": "persoon",
+      "status": "testfase",
+      "reden": "gemeld in Roundbook; gratis API zonder DPA niet nagemeten",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "gemini",
+      "gegevens": "gezondheid",
+      "status": "testfase",
+      "reden": "testfase ZONDER onderbouwing: FOO-228 noemt Gemini gratis ('geen gevoelige info') een van de zwaarste risico's; nu nog nodig voor spraak in Foodie",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "herzien": "vóór commerciële lancering",
+      "bron": "panel 1 nov 2026, #1"
+    },
+
+    {
+      "provider": "lovable",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "openbare tekst",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "lovable",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Peters eigen gegevens",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "lovable",
+      "gegevens": "persoon",
+      "status": "testfase",
+      "reden": "gemeld in Roundbook; DPA bestaat, doorgifte niet nagemeten",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "lovable",
+      "gegevens": "gezondheid",
+      "status": "testfase",
+      "reden": "testfase ZONDER onderbouwing: Lovable-DPA verbiedt bijzondere categorieën, 90 dagen prompt-logging (FOO-228); nu nog terugval voor spraak en beeld in Foodie",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "herzien": "vóór commerciële lancering",
+      "bron": "panel 1 nov 2026, #1"
+    },
+
+    {
+      "provider": "meta",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "beeldprompts voor artikels",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "meta",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Peters eigen beelden",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §3"
+    },
+    {
+      "provider": "meta",
+      "gegevens": "persoon",
+      "status": "uitgesloten",
+      "reden": "niet beslist",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "meta",
+      "gegevens": "gezondheid",
+      "status": "uitgesloten",
+      "reden": "niet beslist",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+
+    {
+      "provider": "mistral",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "Eendje-vertalingen",
+      "wie": "Peter",
+      "datum": "2026-11-01",
+      "bron": "ontwerp §1"
+    },
+    {
+      "provider": "mistral",
+      "gegevens": "prive-peter",
+      "status": "testfase",
+      "reden": "niet gebruikt",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "mistral",
+      "gegevens": "persoon",
+      "status": "uitgesloten",
+      "reden": "niet beslist",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "mistral",
+      "gegevens": "gezondheid",
+      "status": "uitgesloten",
+      "reden": "niet beslist",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+
+    {
+      "provider": "huggingface",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "Tarifit-TTS van lesmateriaal",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "huggingface",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "eigen opnames",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "nebius",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "embeddings",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    },
+    {
+      "provider": "nebius",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "Merlin-geheugen",
+      "wie": "Peter",
+      "datum": "2026-11-01"
+    }
+  ],
+  "contexten": {
+    "roundbook": {
+      "omschrijving": "Verwerkersovereenkomst Roundbook (Eagle-Eye): berichten van Arend-Jan in Telegram met salonnamen en voornamen. Enkel providers uit de sub-verwerkerslijst.",
+      "providers": [
+        {
+          "provider": "gemini",
+          "gemeld_aan_klant": "2026-10-28",
+          "bron": "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts"
+        },
+        {
+          "provider": "lovable",
+          "gemeld_aan_klant": "2026-10-28",
+          "bron": "AVG-panel Roundbook 28 okt 2026, punt 6; shintaka telegram-ai.ts"
+        }
+      ]
+    }
+  },
+  "projecten": {
+    "foodie": {
+      "omschrijving": "hapklik / foodieapp.eu: maaltijden, foto's, gewicht, coaching",
+      "gegevens": "gezondheid"
+    },
+    "eendje": {
+      "omschrijving": "eendje.be: artikels, topics, vertalingen, beeld",
+      "gegevens": "publiek"
+    },
+    "billara": {
+      "omschrijving": "Tickbook/Billara: Telegram-bot, meetings, klantberichten, Roundbook",
+      "gegevens": "persoon"
+    },
+    "roundbook": {
+      "omschrijving": "Roundbook-flows in Billara",
+      "gegevens": "persoon",
+      "context": "roundbook"
+    },
+    "shintaka": {
+      "omschrijving": "Shintaka-webshop: artikels, vertalingen; Telegram-flows geven context roundbook mee",
+      "gegevens": "publiek"
+    },
+    "ese": {
+      "omschrijving": "ese-scissors.eu: artikels, vertalingen, sitetekst",
+      "gegevens": "publiek"
+    },
+    "sjabloon": {
+      "omschrijving": "holie-site-sjabloon",
+      "gegevens": "publiek"
+    },
+    "phyllox": {
+      "omschrijving": "Phyllox: moderatie van gebruikersinhoud, Telegram",
+      "gegevens": "persoon"
+    },
+    "holie": { "omschrijving": "holie.be", "gegevens": "publiek" },
+    "podcast": {
+      "omschrijving": "podcast-analyse: duiden, wegen, groeperen",
+      "gegevens": "publiek"
+    },
+    "arrif": {
+      "omschrijving": "arrif.app: woordenboek, bronnenscan",
+      "gegevens": "publiek"
+    },
+    "domus": {
+      "omschrijving": "Domus: woningscore",
+      "gegevens": "prive-peter"
+    },
+    "vacatures": {
+      "omschrijving": "VPS-vacaturescan",
+      "gegevens": "prive-peter"
+    },
+    "merlin": {
+      "omschrijving": "Merlin (OpenClaw op de Pi)",
+      "gegevens": "prive-peter"
+    }
+  }
+}

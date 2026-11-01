@@ -23,6 +23,7 @@ import {
   TARIEVEN,
   transcribeerAudio,
   VIDEO_FORMATEN,
+  wisTegoedCache,
 } from "./ai.ts";
 
 /** De omgevingsvariabelen waarop `ai.ts` terugvalt als `sleutels` een provider mist. */
@@ -32,6 +33,7 @@ const AI_VARS = [
   "DEEPSEEK_API_KEY",
   "ANTHROPIC_API_KEY",
   "META_MODEL_API_KEY",
+  "HOLIE_AI_PROJECT",
 ];
 
 /**
@@ -47,6 +49,7 @@ function test(naam: string, fn: () => void | Promise<void>) {
   Deno.test(naam, async () => {
     const bewaard = AI_VARS.map((v) => [v, Deno.env.get(v)] as const);
     for (const v of AI_VARS) Deno.env.delete(v);
+    wisTegoedCache();
     const echteFetch = globalThis.fetch;
     globalThis.fetch = ((url: string) =>
       Promise.reject(

@@ -14,8 +14,34 @@
  * breekt het antwoord af of blijft het leeg. Deze keten zet het denkwerk daarom
  * altijd uit (`thinking: { type: "disabled" }`), tenzij `deepseekDenken` aan staat.
  *
+ * Sinds 0.22.0 loopt elke aanroep onder het AI-beleid zodra het project bekend is (zie
+ * `stelAiBeleidIn` en `beleid.ts`): uitsluitingen per soort gegevens, projectregels, voorrang.
+ *
  * @module
  */
+
+import {
+  type AiBeleid,
+  type AiType,
+  BeleidLeeg,
+  type Gegevens,
+  type KeuzeStap,
+  type KeuzeUitslag,
+  kiesProviders,
+  NOODBELEID,
+  type StapVerslag,
+  valideerBeleid,
+} from "./beleid.ts";
+
+export type {
+  AiBeleid,
+  AiType,
+  Gegevens,
+  KeuzeStap,
+  KeuzeUitslag,
+  StapVerslag,
+} from "./beleid.ts";
+export { kiesProviders, NOODBELEID, valideerBeleid } from "./beleid.ts";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -327,9 +353,15 @@ export interface AiPoging {
   lengte?: number;
   /** Omschrijving van wat er misliep; leeg bij succes. */
   fout?: string;
+  /** Type aansturing onder beleid (sinds 0.22.0). */
+  type?: AiType;
+  /** Soort gegevens onder beleid (sinds 0.22.0). */
+  gegevens?: Gegevens;
+  /** Niet de eerste provider in de gekozen volgorde. */
+  terugval?: boolean;
 }
 
-export interface AiOpties {
+export interface AiOpties extends BeleidOpties {
   /** Naam in de logregels. */
   label: string;
   /** Enkel meegestuurd als je hem opgeeft; anders kiest de provider. */
@@ -404,6 +436,10 @@ export interface AiAntwoord {
   model: string;
   finishReason?: string;
   usage?: AiVerbruik;
+  /** Onder beleid: type, soort gegevens en of het een terugval was (sinds 0.22.0). */
+  type?: AiType;
+  gegevens?: Gegevens;
+  terugval?: boolean;
 }
 
 /** Lovable weigerde op quotum en de aanroeper vroeg `opQuotum: "throw"`. */
@@ -718,6 +754,14 @@ export function aiSleutels(): Partial<Record<AiProvider, string>> {
   return uit;
 }
 
+/** Wat `callAi` technisch kan aanspreken (chat-completions of Messages). */
+const CHAT_PROVIDERS: readonly AiProvider[] = [
+  "anthropic",
+  "deepseek",
+  "gemini",
+  "lovable",
+];
+
 /** De providers van de standaardketen van `callAi`. */
 export const TEKST_PROVIDERS: AiProvider[] = [
   "anthropic",
@@ -737,8 +781,197 @@ export function heeftAiSleutel(
   return providers.some((p) => !!sleutels[p]);
 }
 
-function leesSleutel(naam: AiProvider, opties: AiOpties): string | undefined {
+function leesSleutel(
+  naam: AiProvider,
+  opties: { sleutels?: Partial<Record<AiProvider, string>> },
+): string | undefined {
   return opties.sleutels?.[naam] || leesEnv(SLEUTEL_VAR[naam]);
+}
+
+// ---------------------------------------------------------------------------
+// Beleid (sinds 0.22.0): zie `beleid.ts` voor de regels en de rangorde.
+// ---------------------------------------------------------------------------
+
+/** Wat elke AI-functie extra aanvaardt om onder het beleid te lopen. */
+export interface BeleidOpties {
+  /**
+   * Projectnaam in het beleid, bv. "foodie". Anders `stelAiBeleidIn({ project })` of de
+   * omgevingsvariabele `HOLIE_AI_PROJECT`. Zonder project loopt de aanroep NIET onder beleid
+   * (gedrag van vóór 0.22.0) en verschijnt er eenmaal een waarschuwing.
+   */
+  project?: string;
+  /** Soort gegevens in deze aanroep. Zonder: de projectstandaard uit het beleid. */
+  gegevens?: Gegevens;
+  /** Verwerkerscontext, bv. "roundbook". Zonder: de projectstandaard. */
+  context?: string;
+  /** Bewust vaste keten: buiten voorrang, maar NIET buiten de uitsluitingen. */
+  vast?: boolean;
+  /** Type aansturing; `callAi` leidt het anders af (tools, beeld-in of tekst). */
+  type?: AiType;
+  /** Providers waarvoor de gebruiker toestemming gaf (`toestemming_vereist`). */
+  toestemming?: readonly string[];
+}
+
+let ingesteld: { project?: string; momentopname?: AiBeleid } = {};
+let gewaarschuwdZonderBeleid = false;
+
+/**
+ * Zet een project onder beleid. Roep dit eenmaal op in de gedeelde AI-laag van het project:
+ *
+ * ```ts
+ * import { AI_BELEID } from "./ai-beleid.ts"; // momentopname, bij elke uitrol ververst
+ * stelAiBeleidIn({ project: "foodie", momentopname: AI_BELEID });
+ * ```
+ *
+ * De momentopname is de terugval als het beleidsadres onbereikbaar is (panel #5). Zonder
+ * momentopname geldt dan het strenge `NOODBELEID` uit het pakket.
+ */
+export function stelAiBeleidIn(
+  opties: { project?: string; momentopname?: unknown },
+): void {
+  ingesteld = {
+    project: opties.project,
+    momentopname: opties.momentopname === undefined
+      ? undefined
+      : valideerBeleid(opties.momentopname),
+  };
+}
+
+/** Het project waaronder deze omgeving draait, of `undefined` (niet onder beleid). */
+export function aiProject(opties?: BeleidOpties): string | undefined {
+  return opties?.project ?? ingesteld.project ?? leesEnv("HOLIE_AI_PROJECT");
+}
+
+/**
+ * Het beleid dat nu geldt: de ingestelde momentopname, anders het noodbeleid. (Fase B voegt
+ * daar het opgehaalde, ondertekende bestand vóór.)
+ */
+export function huidigAiBeleid(): { beleid: AiBeleid; bron: string } {
+  if (ingesteld.momentopname) {
+    return { beleid: ingesteld.momentopname, bron: "momentopname" };
+  }
+  return { beleid: NOODBELEID, bron: "noodbeleid" };
+}
+
+/** Het beleid liet geen provider over. Ook een `AiOnbeschikbaar`, met `status` 0. */
+export class AiBeleidFout extends AiOnbeschikbaar {
+  readonly stap: KeuzeStap;
+  readonly stappen: StapVerslag[];
+  constructor(fout: BeleidLeeg) {
+    super(fout.message, 0);
+    this.name = "AiBeleidFout";
+    this.stap = fout.stap;
+    this.stappen = fout.stappen;
+  }
+}
+
+/** Hoe lang een provider overgeslagen wordt nadat hij "tegoed op" meldde. */
+export const TEGOED_OP_MS = 10 * 60 * 1000;
+const tegoedOpTot = new Map<string, number>();
+const cacheSleutel = (provider: string, sleutel: string) =>
+  `${provider}:${sleutel.slice(-8)}`;
+
+/**
+ * Zegt een foutantwoord dat het tegoed op is (of de rekening geblokt)? 400/401/402 met
+ * "credit" of "balance" in de tekst: Anthropic geeft 400 "credit balance is too low",
+ * DeepSeek 402 "Insufficient Balance".
+ */
+export function isTegoedFout(status: number, tekst: string): boolean {
+  return [400, 401, 402].includes(status) && /credit|balance/i.test(tekst);
+}
+
+function markeerTegoedOp(provider: string, sleutel: string, nu = Date.now()) {
+  tegoedOpTot.set(cacheSleutel(provider, sleutel), nu + TEGOED_OP_MS);
+}
+
+function isTegoedOp(provider: string, sleutel: string | undefined): boolean {
+  if (!sleutel) return false;
+  const k = cacheSleutel(provider, sleutel);
+  const tot = tegoedOpTot.get(k);
+  if (tot === undefined) return false;
+  if (Date.now() > tot) {
+    tegoedOpTot.delete(k);
+    return false;
+  }
+  return true;
+}
+
+/** Leegt de negatieve cache. Voor tests, of na het opladen van een tegoed. */
+export function wisTegoedCache(): void {
+  tegoedOpTot.clear();
+}
+
+interface Keuze {
+  volgorde: AiProvider[];
+  uitslag?: KeuzeUitslag;
+}
+
+/**
+ * De providerlijst voor één aanroep. Onder beleid volgens `kiesProviders`; zonder project de
+ * oude werking (volgorde, zonder sleutel overslaan), maar met de negatieve cache.
+ */
+function kiesVoorAanroep(
+  label: string,
+  type: AiType,
+  opties: BeleidOpties & {
+    volgorde?: AiProvider[];
+    sleutels?: Partial<Record<AiProvider, string>>;
+  },
+  standaard: readonly AiProvider[],
+  pakket: readonly AiProvider[],
+): Keuze {
+  const sleutelVan = (p: string) => leesSleutel(p as AiProvider, opties);
+  const project = aiProject(opties);
+  if (!project) {
+    if (!gewaarschuwdZonderBeleid) {
+      gewaarschuwdZonderBeleid = true;
+      console.warn(
+        `[ai:${label}] NIET ONDER BELEID: geen project (stelAiBeleidIn of HOLIE_AI_PROJECT)`,
+      );
+    }
+    const metSleutel = (opties.volgorde ?? standaard).filter((p) =>
+      sleutelVan(p)
+    );
+    const volgorde = metSleutel.filter((p) => !isTegoedOp(p, sleutelVan(p)));
+    if (metSleutel.length > 0 && volgorde.length === 0) {
+      throw new AiBeleidFout(
+        new BeleidLeeg("tegoed op", [{
+          stap: "tegoed op",
+          over: [],
+          weg: metSleutel.map((p) => ({
+            provider: p,
+            reden: "tegoed op of geblokkeerd (negatieve cache)",
+          })),
+        }], type),
+      );
+    }
+    return { volgorde };
+  }
+  const { beleid, bron } = huidigAiBeleid();
+  try {
+    const uitslag = kiesProviders(beleid, {
+      type,
+      project,
+      gegevens: opties.gegevens,
+      context: opties.context,
+      vast: opties.vast,
+      volgorde: opties.volgorde,
+      toestemming: opties.toestemming,
+      pakket,
+      heeftSleutel: (p) => !!sleutelVan(p),
+      tegoedOp: (p) => isTegoedOp(p, sleutelVan(p)),
+    });
+    for (const w of uitslag.waarschuwingen) {
+      console.warn(`[ai:${label}] beleid (${bron}): ${w}`);
+    }
+    return { volgorde: uitslag.volgorde as AiProvider[], uitslag };
+  } catch (e) {
+    if (e instanceof BeleidLeeg) {
+      console.warn(`[ai:${label}] beleid (${bron}): ${e.message}`);
+      throw new AiBeleidFout(e);
+    }
+    throw e;
+  }
 }
 
 async function roep(
@@ -803,7 +1036,19 @@ export async function callAi(
     pogingen = 1,
   } = opties;
 
-  const beschikbaar = volgorde.filter((naam) => leesSleutel(naam, opties));
+  const type: AiType = opties.type ??
+    (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
+  const keuze = kiesVoorAanroep(
+    label,
+    type,
+    { ...opties, volgorde: opties.volgorde },
+    volgorde,
+    CHAT_PROVIDERS,
+  );
+  const beschikbaar = keuze.volgorde;
+  const beleidVelden = keuze.uitslag
+    ? { type, gegevens: keuze.uitslag.gegevens }
+    : {};
   let laatsteFout = "";
   let laatsteStatus = 0;
 
@@ -811,6 +1056,7 @@ export async function callAi(
     const naam = beschikbaar[i];
     const laatste = i === beschikbaar.length - 1;
     const sleutel = leesSleutel(naam, opties)!;
+    const terugval = i > 0;
 
     if (naam === "deepseek" && opties.beeld && heeftBeeldInSysteem(messages)) {
       laatsteFout =
@@ -867,7 +1113,7 @@ export async function callAi(
 
     for (let poging = 1; poging <= pogingen; poging++) {
       const start = Date.now();
-      const basis = { label, provider, model };
+      const basis = { label, provider, model, ...beleidVelden, terugval };
       let herkansing = false;
       try {
         const resp = await fetch(ENDPOINT[naam], {
@@ -891,6 +1137,14 @@ export async function callAi(
           laatsteFout = `${provider} gaf ${resp.status}`;
           laatsteStatus = resp.status;
           console.warn(`[ai:${label}] ${laatsteFout} ${detail}`);
+          if (isTegoedFout(resp.status, detail)) {
+            markeerTegoedOp(naam, sleutel);
+            console.warn(
+              `[ai:${label}] ${naam}: tegoed op, ${
+                TEGOED_OP_MS / 60000
+              } min overgeslagen`,
+            );
+          }
           await roep(opties.bijFout, {
             ...basis,
             duurMs: Date.now() - start,
@@ -947,6 +1201,8 @@ export async function callAi(
               model,
               finishReason,
               usage,
+              ...beleidVelden,
+              terugval,
             };
           }
           if (content && finishReason === "length" && !laatste) {
@@ -958,7 +1214,15 @@ export async function callAi(
           if (content) {
             if (!opties.aanvaard || opties.aanvaard(content, provider)) {
               await roep(opties.bijSucces, verslag);
-              return { content, provider, model, finishReason, usage };
+              return {
+                content,
+                provider,
+                model,
+                finishReason,
+                usage,
+                ...beleidVelden,
+                terugval,
+              };
             }
             laatsteFout = `${provider}: antwoord afgekeurd`;
             await roep(opties.bijFout, { ...verslag, fout: laatsteFout });
@@ -1027,7 +1291,7 @@ export async function callAi(
  */
 export const AUDIO_PROVIDERS: AiProvider[] = ["gemini", "lovable"];
 
-export interface AudioOpties {
+export interface AudioOpties extends BeleidOpties {
   /** Naam in de logregels, bv. "transcribe-and-analyze". */
   label: string;
   /** De audio als base64, zonder `data:`-voorvoegsel. */
@@ -1083,6 +1347,9 @@ export interface AudioAntwoord {
   provider: AiProvider;
   model: string;
   usage?: AiVerbruik;
+  type?: AiType;
+  gegevens?: Gegevens;
+  terugval?: boolean;
 }
 
 /**
@@ -1167,7 +1434,17 @@ export async function transcribeerAudio(
     );
   }
 
-  const volgorde = opties.volgorde ?? AUDIO_PROVIDERS;
+  const audioKeuze = kiesVoorAanroep(
+    opties.label,
+    opties.type ?? "audio-in",
+    opties,
+    AUDIO_PROVIDERS,
+    ["gemini", "lovable"],
+  );
+  const volgorde = audioKeuze.volgorde;
+  const audioBeleid = audioKeuze.uitslag
+    ? { type: audioKeuze.uitslag.type, gegevens: audioKeuze.uitslag.gegevens }
+    : {};
   // De keten loopt hier over PROVIDERS en binnen elke provider over MODELLEN.
   // De modelnamen verschillen per provider: Google's eigen API kent
   // "gemini-3.5-flash-lite", de Lovable-gateway kent dat als
@@ -1216,9 +1493,10 @@ export async function transcribeerAudio(
   let laatsteStatus = 0;
 
   for (const provider of volgorde) {
-    const sleutel = leesSleutel(provider, opties as unknown as AiOpties);
+    const sleutel = leesSleutel(provider, opties);
     if (!sleutel) continue;
     beschikbaar.push(provider);
+    const terugval = beschikbaar.length > 1;
 
     // Gaat aan bij een 429 op de gratis route: alle modellen van deze provider
     // delen hetzelfde projectquotum, dus ze zijn allemaal tegelijk op.
@@ -1278,6 +1556,11 @@ export async function transcribeerAudio(
           const duurMs = Date.now() - start;
 
           if (!resp.ok || !tekst) {
+            if (
+              !resp.ok && isTegoedFout(status, JSON.stringify(data ?? ""))
+            ) {
+              markeerTegoedOp(provider, sleutel);
+            }
             laatsteStatus = status;
             laatsteFout = `${provider} gaf ${status}${
               tekst ? "" : " (lege inhoud)"
@@ -1287,6 +1570,8 @@ export async function transcribeerAudio(
               label: opties.label,
               provider,
               model,
+              ...audioBeleid,
+              terugval,
               duurMs,
               status,
               fout: laatsteFout,
@@ -1318,12 +1603,21 @@ export async function transcribeerAudio(
             label: opties.label,
             provider,
             model,
+            ...audioBeleid,
+            terugval,
             duurMs,
             status,
             usage: data?.usage,
             lengte: tekst.length,
           });
-          return { tekst, provider, model, usage: data?.usage };
+          return {
+            tekst,
+            provider,
+            model,
+            usage: data?.usage,
+            ...audioBeleid,
+            terugval,
+          };
         } catch (e) {
           laatsteFout = `${provider}: ${foutTekst(e)}`;
           console.warn(`[audio:${opties.label}] ${laatsteFout}`);
@@ -1331,6 +1625,8 @@ export async function transcribeerAudio(
             label: opties.label,
             provider,
             model,
+            ...audioBeleid,
+            terugval,
             duurMs: Date.now() - start,
             status,
             fout: laatsteFout,
@@ -1358,7 +1654,7 @@ export async function transcribeerAudio(
  */
 export const BEELD_PROVIDERS: AiProvider[] = ["meta", "lovable"];
 
-export interface BeeldOpties {
+export interface BeeldOpties extends BeleidOpties {
   /** Naam in de logregels, bv. "telegram-webhook". */
   label: string;
   /** De prompt voor het beeld, in het Engels. */
@@ -1391,6 +1687,9 @@ export interface BeeldAntwoord {
   provider: AiProvider;
   model: string;
   usage?: AiVerbruik;
+  type?: AiType;
+  gegevens?: Gegevens;
+  terugval?: boolean;
 }
 
 /**
@@ -1477,7 +1776,17 @@ function beeldMime(bytes: Uint8Array, terugval: string): string {
 export async function genereerBeeld(
   opties: BeeldOpties,
 ): Promise<BeeldAntwoord> {
-  const volgorde = opties.volgorde ?? BEELD_PROVIDERS;
+  const beeldKeuze = kiesVoorAanroep(
+    opties.label,
+    opties.type ?? "beeld-uit",
+    opties,
+    BEELD_PROVIDERS,
+    ["meta", "lovable"],
+  );
+  const volgorde = beeldKeuze.volgorde;
+  const beeldBeleid = beeldKeuze.uitslag
+    ? { type: beeldKeuze.uitslag.type, gegevens: beeldKeuze.uitslag.gegevens }
+    : {};
   const lovableModellen =
     (Array.isArray(opties.model)
       ? opties.model
@@ -1492,9 +1801,10 @@ export async function genereerBeeld(
   let quotumFout: AiQuotumFout | undefined;
 
   for (const provider of volgorde) {
-    const sleutel = leesSleutel(provider, opties as unknown as AiOpties);
+    const sleutel = leesSleutel(provider, opties);
     if (!sleutel) continue;
     beschikbaar.push(provider);
+    const terugval = beschikbaar.length > 1;
     const isMeta = provider === "meta";
     const modellen = isMeta
       ? [...STANDAARD_MODELLEN.metaBeeld]
@@ -1542,6 +1852,8 @@ export async function genereerBeeld(
             label: opties.label,
             provider,
             model,
+            ...beeldBeleid,
+            terugval,
             duurMs,
             status,
             fout: laatsteFout,
@@ -1560,6 +1872,8 @@ export async function genereerBeeld(
             label: opties.label,
             provider,
             model,
+            ...beeldBeleid,
+            terugval,
             duurMs,
             status,
             fout: laatsteFout,
@@ -1600,6 +1914,8 @@ export async function genereerBeeld(
             label: opties.label,
             provider,
             model,
+            ...beeldBeleid,
+            terugval,
             duurMs,
             status,
             usage: data?.usage,
@@ -1614,6 +1930,8 @@ export async function genereerBeeld(
             provider,
             model,
             usage: data?.usage,
+            ...beeldBeleid,
+            terugval,
           };
         }
 
@@ -1627,6 +1945,8 @@ export async function genereerBeeld(
             label: opties.label,
             provider,
             model,
+            ...beeldBeleid,
+            terugval,
             duurMs,
             status,
             usage: data?.usage,
@@ -1664,12 +1984,22 @@ export async function genereerBeeld(
           label: opties.label,
           provider,
           model,
+          ...beeldBeleid,
+          terugval,
           duurMs,
           status,
           usage: data?.usage,
           lengte: bytes.length,
         });
-        return { bytes, mimeType, provider, model, usage: data?.usage };
+        return {
+          bytes,
+          mimeType,
+          provider,
+          model,
+          usage: data?.usage,
+          ...beeldBeleid,
+          terugval,
+        };
       } catch (e) {
         // Regel 2 en 3 dragen hun eigen fout: die zijn definitief.
         if (e instanceof AiQuotumFout || e instanceof BeeldGeweigerd) throw e;
@@ -1680,6 +2010,8 @@ export async function genereerBeeld(
           label: opties.label,
           provider,
           model,
+          ...beeldBeleid,
+          terugval,
           duurMs: Date.now() - start,
           status,
           fout: laatsteFout,
@@ -1804,6 +2136,16 @@ export const TARIEVEN: Record<string, { input: number; output: number }> = {
   // zoveel, dat laat deze tabel buiten beschouwing. Betaald uit het
   // maandtegoed van Claude Max zolang dat niet op is.
   "claude-haiku-5-5": { input: 0.10 / 1_000_000, output: 0.50 / 1_000_000 },
+  // Sonnet en Opus (sinds 0.22.0): Eendje-vertalingen, podcast-duiden en losse scripts
+  // gebruiken ze. Zonder deze regels telde elke Sonnet-call als 0 USD "geschat" en
+  // onderschatte de teller het Claude-verbruik (panel 1 nov 2026, #7). Afgelezen uit de
+  // modeltabel van Anthropic (stand 6 okt 2026), first-party API, zonder cache.
+  "claude-sonnet-5-5": { input: 2 / 1_000_000, output: 10 / 1_000_000 },
+  "claude-sonnet-5": { input: 2 / 1_000_000, output: 10 / 1_000_000 },
+  "claude-sonnet-4-6": { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+  "claude-opus-5-5": { input: 4 / 1_000_000, output: 20 / 1_000_000 },
+  "claude-opus-5": { input: 5 / 1_000_000, output: 25 / 1_000_000 },
+  "claude-opus-4-8": { input: 5 / 1_000_000, output: 25 / 1_000_000 },
   // Spraak op Google's eigen gratis API. Nul, en dat is de hele reden dat die
   // route vóór Lovable staat. De modelnamen dragen hier GEEN "google/"-voorvoegsel:
   // dat is precies het verschil tussen deze route en de gateway, dus een
@@ -1864,8 +2206,9 @@ export function schatUsd(
   const tarief = TARIEVEN[model];
   if (!tarief) return { usd: 0, input: 0, output: 0, geschat: true };
 
-  const input = usage?.prompt_tokens ?? 0;
-  let output = usage?.completion_tokens ?? 0;
+  // OpenAI-vorm of de ruwe Anthropic-vorm (scripts die zelf de Messages API aanspreken).
+  const input = Number(usage?.prompt_tokens ?? usage?.input_tokens ?? 0);
+  let output = Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0);
   let geschat = false;
 
   // Geen usage in het antwoord? Voor beeld kennen we het vaste tokenaantal.

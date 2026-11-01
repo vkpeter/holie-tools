@@ -108,6 +108,68 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.22.0 (ai): het AI-beleid
+
+Eén beleid voor alle projecten bepaalt welke provider een aanroep mag en in
+welke volgorde (`./beleid`, het bestand zelf in `beleid/ai-beleid.json`,
+meegeleverd als `./ai-beleid`). Rangorde, altijd dezelfde:
+
+    uitsluiting > projectverbod > witte lijst > voorrang > basis
+
+```ts
+import { callAi, stelAiBeleidIn } from "jsr:@holie/tools@^0.22/ai";
+import { AI_BELEID } from "jsr:@holie/tools@^0.22/ai-beleid";
+
+stelAiBeleidIn({ project: "foodie", momentopname: AI_BELEID });
+
+// Gegevens = projectstandaard (gezondheid); per aanroep te overschrijven.
+await callAi(berichten, { label: "coach" });
+await callAi(berichten, { label: "vertaal", gegevens: "publiek" });
+// Bewust vaste keten: geen voorrang, wél de uitsluitingen.
+await callAi(berichten, {
+  label: "telefoon",
+  volgorde: ["deepseek"],
+  vast: true,
+});
+// Verwerkerscontext: enkel providers die aan de klant gemeld zijn.
+await callAi(berichten, {
+  label: "tg",
+  gegevens: "persoon",
+  context: "roundbook",
+});
+```
+
+- **Zonder project** (geen `stelAiBeleidIn`, geen `HOLIE_AI_PROJECT`) loopt
+  alles zoals vóór 0.22.0, met eenmaal de waarschuwing `NIET ONDER BELEID`. Een
+  pakketupgrade verandert dus niets tot het project zich aanmeldt.
+- **Toelating** per provider x soort gegevens (`publiek`, `prive-peter`,
+  `persoon`, `gezondheid`), optioneel per project, met status `onderbouwd`,
+  `testfase` of `uitgesloten`. Geen regel = uitgesloten. Na `geldig_tot` slaat
+  een toelating vanzelf om naar uitgesloten. `toestemming_vereist` vraagt
+  `toestemming: ["deepseek"]` in de aanroep.
+- **Verwerkerscontext** (bv. `roundbook`): enkel providers met
+  `gemeld_aan_klant`.
+- **Projectregels**: `verboden` (nooit, ook niet als terugval) en `wittelijst`
+  (`zacht`: zo ver als mogelijk; `strikt`: anders een fout), beide optioneel per
+  type.
+- **Voorrang** op datum (`van`/`tot`), globaal of per project, per type.
+- **Leeg = fout**: `AiBeleidFout` (een `AiOnbeschikbaar`) met `stap` = de stap
+  die de lijst leegmaakte (`capaciteit`, `uit`, `uitsluiting`,
+  `verwerkerscontext`, `projectverbod`, `witte lijst`, `sleutel`, `tegoed op`).
+- **Negatieve cache**: een 400/401/402 met "credit" of "balance" in de tekst zet
+  die provider (per sleutel) 10 minuten buiten de keten (`TEGOED_OP_MS`). Ook
+  zonder beleid.
+- **Terugval**: zonder momentopname geldt `NOODBELEID`: persoon en gezondheid
+  enkel naar Claude.
+- Antwoorden en hooks dragen nu `type`, `gegevens` en `terugval`.
+- `kiesProviders(beleid, vraag)` is de "wat zou er gebeuren"-toets, zonder call.
+- `TARIEVEN` kent Sonnet 5.5/5/4.6 en Opus 5.5/5/4.8; `schatUsd` leest ook de
+  ruwe Anthropic-vorm (`input_tokens`/`output_tokens`).
+
+Beleid wijzigen: `beleid/ai-beleid.json` aanpassen, `volgnummer` ophogen,
+`deno task
+beleid` (schrijft `ai-beleid.ts`), testen, release.
+
 ## Nieuw in 0.21.0 (talen): `externeLink` weer weg
 
 `externeLink` en `externeLinkUitRij` uit 0.20.0 zijn verwijderd. Peter,
