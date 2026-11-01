@@ -108,6 +108,60 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.27.0 (telegram): kort geheugen voor bots
+
+Een bot die vrije tekst door een AI laat lezen, vergat tot nu elk vorig bericht.
+Vroeg hij "op welk nummer?", dan kwam het antwoord "+32499..." los binnen en was
+het belverzoek weg (Billara, 1 nov 2026: drie berichten voor één oproep). Nu
+onthoudt een bot de berichten waarop hij een verduidelijking vroeg, 10 minuten
+lang, en geeft hij ze mee aan de AI.
+
+```ts
+import {
+  GEHEUGEN_GELDIG_MS,
+  GEHEUGEN_INSTRUCTIE,
+  geheugenPrompt,
+} from "jsr:@holie/tools@^0.27/telegram";
+
+const { data: onaf } = await db.from("telegram_onaf")
+  .select("tekst, antwoord, gemaakt_op").eq("chat_id", chatId)
+  .gte("gemaakt_op", new Date(Date.now() - GEHEUGEN_GELDIG_MS).toISOString());
+const prompt = geheugenPrompt(
+  (onaf ?? []).map((r) => ({
+    tekst: r.tekst,
+    antwoord: r.antwoord,
+    op: r.gemaakt_op,
+  })),
+  tekst,
+);
+const antwoord = await callAi([
+  {
+    role: "system",
+    content: `${systeem}
+${GEHEUGEN_INSTRUCTIE}`,
+  },
+  { role: "user", content: prompt },
+]);
+// Vroeg de bot een verduidelijking: bewaar.
+await db.from("telegram_onaf").insert({
+  chat_id: chatId,
+  tekst,
+  antwoord: vraag,
+});
+// Deed de bot iets: vergeet.
+await db.from("telegram_onaf").delete().eq("chat_id", chatId);
+```
+
+- De tabel staat in `sql/telegram_onaf.sql`: kopieer ze in een migratie van het
+  project. Enkel de service role mag erin.
+- `geheugenPrompt` geeft het nieuwe bericht ongewijzigd terug als er geen
+  geldige eerdere berichten zijn. Hoogstens 3 berichten, elk afgeknipt op 500
+  tekens.
+- `GEHEUGEN_INSTRUCTIE` hoort in de systeemprompt: een volledig, ander verzoek
+  negeert de oude berichten.
+- Bewaar enkel berichten waarop de bot iets terugvroeg, nooit gewone opdrachten:
+  anders voert de AI een oude opdracht opnieuw uit.
+
 ## Nieuw in 0.26.0 (ai): elke aanroep meldt zijn verbruik
 
 Fase D van het AI-beleid (ontwerp §7). `callAi`, `transcribeerAudio` en

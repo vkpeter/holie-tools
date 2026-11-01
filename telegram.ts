@@ -927,3 +927,108 @@ export async function leesBevestigKnop(
 export function escapeMarkdownV2(tekst: string): string {
   return tekst.replace(/[_*\[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
 }
+
+// ───────────── Kort geheugen (0.27.0) ─────────────
+
+/** Hoe lang een onaf verzoek meetelt: 10 minuten, zoals een bevestigknop. */
+export const GEHEUGEN_GELDIG_MS = 10 * 60 * 1000;
+
+/** Hoeveel onafgewerkte berichten hoogstens meegaan naar de AI. */
+export const GEHEUGEN_MAX_BERICHTEN = 3;
+
+/** Langste tekst per bericht in het geheugen; de rest wordt afgeknipt. */
+export const GEHEUGEN_MAX_TEKST = 500;
+
+/**
+ * Een bericht waarop de bot een verduidelijking vroeg in plaats van iets te doen.
+ * `op` is het tijdstip van het bericht (Date, ms of ISO-tekst uit de databank).
+ */
+export interface OnafBericht {
+  tekst: string;
+  antwoord?: string | null;
+  op: Date | number | string;
+}
+
+/** Opties voor `geldigeOnafBerichten` en `geheugenPrompt`. */
+export interface GeheugenOpties {
+  geldigMs?: number;
+  max?: number;
+  /** Te vervangen in tests. */
+  nu?: Date | number;
+}
+
+/**
+ * Regel voor de systeemprompt van een bot die het korte geheugen gebruikt. Zet ze
+ * er altijd bij: zonder die regel leest de AI een oud verzoek als een nieuwe opdracht.
+ */
+export const GEHEUGEN_INSTRUCTIE =
+  "Soms krijg je eerdere berichten mee waarop je nog een verduidelijking vroeg. " +
+  "Is het nieuwe bericht op zichzelf onvolledig (een los telefoonnummer, een naam, " +
+  '"ik ben X", "ja", een datum), lees het dan als antwoord op die eerdere berichten ' +
+  "en voer het oorspronkelijke verzoek uit. Is het nieuwe bericht een volledig, " +
+  "ander verzoek, negeer dan de eerdere berichten.";
+
+function tijdVan(op: Date | number | string): number {
+  return op instanceof Date
+    ? op.getTime()
+    : typeof op === "number"
+    ? op
+    : Date.parse(op);
+}
+
+function kort(tekst: string): string {
+  const t = tekst.replace(/\s+/g, " ").trim();
+  return t.length > GEHEUGEN_MAX_TEKST
+    ? `${t.slice(0, GEHEUGEN_MAX_TEKST)}…`
+    : t;
+}
+
+/**
+ * De onafgewerkte berichten die nog meetellen: jonger dan `geldigMs`, oudste
+ * eerst, hoogstens de laatste `max`. Berichten met een onleesbare tijd vallen weg.
+ */
+export function geldigeOnafBerichten(
+  berichten: OnafBericht[],
+  opties: GeheugenOpties = {},
+): OnafBericht[] {
+  const nu = tijdstip(opties.nu);
+  const geldigMs = opties.geldigMs ?? GEHEUGEN_GELDIG_MS;
+  const max = Math.max(1, opties.max ?? GEHEUGEN_MAX_BERICHTEN);
+  return berichten
+    .map((b) => ({ b, t: tijdVan(b.op) }))
+    .filter(({ t }) => Number.isFinite(t) && t <= nu && nu - t <= geldigMs)
+    .sort((x, y) => x.t - y.t)
+    .slice(-max)
+    .map(({ b }) => b);
+}
+
+/**
+ * De gebruikerstekst voor de AI: het nieuwe bericht, met de onafgewerkte
+ * berichten ervoor als die er zijn. Zonder geldige eerdere berichten komt het
+ * nieuwe bericht ongewijzigd terug, zodat een bot zonder geheugen niets merkt.
+ *
+ * Zo bewaart een bot zijn geheugen (tabel uit `sql/telegram_onaf.sql`):
+ * - vóór de AI: lees de rijen van deze chat en geef ze hier mee;
+ * - vroeg de bot een verduidelijking: bewaar het bericht en zijn vraag;
+ * - deed de bot iets: wis de rijen van deze chat.
+ */
+export function geheugenPrompt(
+  berichten: OnafBericht[],
+  nieuw: string,
+  opties: GeheugenOpties = {},
+): string {
+  const geldig = geldigeOnafBerichten(berichten, opties);
+  if (geldig.length === 0) return nieuw;
+  const regels = geldig.map((b, i) => {
+    const vraag = b.antwoord
+      ? ` Jij vroeg: ${JSON.stringify(kort(b.antwoord))}`
+      : "";
+    return `${i + 1}. Gebruiker: ${JSON.stringify(kort(b.tekst))}.${vraag}`;
+  });
+  return [
+    "Eerdere berichten waarop je nog een verduidelijking vroeg (oudste eerst):",
+    ...regels,
+    "",
+    `Nieuw bericht: ${nieuw}`,
+  ].join("\n");
+}

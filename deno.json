@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -35,6 +35,7 @@
       "codes.ts",
       "nieuwsbrief.ts",
       "sql/rate_limit_hit.sql",
+      "sql/telegram_onaf.sql",
       "sql/nieuwsbrief.sql",
       "README.md",
       "LICENSE"

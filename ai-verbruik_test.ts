@@ -162,7 +162,7 @@ test(
     await aiVerbruikVersturen();
     const posts = verbruikPosts(oproepen);
     assertEquals(posts.length, 1);
-    assertEquals(posts[0].v, "0.26.0");
+    assertEquals(posts[0].v, "0.27.0");
     assertEquals(posts[0].regels[0].aanroepen, 2);
     assertEquals(aiVerbruikWachtrij(), []);
   },
