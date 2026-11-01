@@ -136,7 +136,7 @@ Regels die erbij horen:
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
-## Nieuw in 0.25.1 (ai-beleid)
+## Nieuw in 0.25.2 (ai-beleid)
 
 Momentopname op beleid volgnummer 3: DeepSeek toegelaten voor persoonsgegevens
 in Shintaka, en project `billara-klantmail` (Claude altijd eerst, DeepSeek enkel
