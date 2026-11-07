@@ -127,30 +127,30 @@ export const AI_BELEID: AiBeleid = {
   },
   "basis": {
     "tekst": [
-      "deepseek",
-      "gemini",
       "anthropic",
+      "gemini",
       "lovable",
+      "deepseek",
     ],
     "tools": [
-      "deepseek",
-      "gemini",
       "anthropic",
+      "gemini",
       "lovable",
+      "deepseek",
     ],
     "beeld-in": [
-      "deepseek",
-      "gemini",
       "anthropic",
+      "gemini",
       "lovable",
+      "deepseek",
     ],
     "audio-in": [
       "gemini",
       "lovable",
     ],
     "beeld-uit": [
-      "meta",
       "lovable",
+      "meta",
     ],
     "tts": [
       "huggingface",

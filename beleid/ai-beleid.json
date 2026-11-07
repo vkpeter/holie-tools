@@ -110,30 +110,30 @@
   },
   "basis": {
     "tekst": [
-      "deepseek",
-      "gemini",
       "anthropic",
-      "lovable"
+      "gemini",
+      "lovable",
+      "deepseek"
     ],
     "tools": [
-      "deepseek",
-      "gemini",
       "anthropic",
-      "lovable"
+      "gemini",
+      "lovable",
+      "deepseek"
     ],
     "beeld-in": [
-      "deepseek",
-      "gemini",
       "anthropic",
-      "lovable"
+      "gemini",
+      "lovable",
+      "deepseek"
     ],
     "audio-in": [
       "gemini",
       "lovable"
     ],
     "beeld-uit": [
-      "meta",
-      "lovable"
+      "lovable",
+      "meta"
     ],
     "tts": [
       "huggingface"

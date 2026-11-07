@@ -179,14 +179,14 @@ test(
       chatOk("van deepseek"),
     );
     const r1 = await callAi(vraag, { label: "t", sleutels: alle });
-    assertEquals(r1.provider, "deepseek");
+    assertEquals(r1.provider, "gemini");
     assertEquals(urls.length, 2);
-    zet(chatOk("weer deepseek"));
+    zet(chatOk("weer gemini"));
     const r2 = await callAi(vraag, { label: "t", sleutels: alle });
-    assertEquals(r2.provider, "deepseek");
-    // De tweede aanroep sloeg Claude over: één call extra, naar DeepSeek.
+    assertEquals(r2.provider, "gemini");
+    // De tweede aanroep sloeg Claude over: één call extra, naar Gemini.
     assertEquals(urls.length, 3);
-    assert(urls[2].includes("deepseek"));
+    assert(urls[2].includes("generativelanguage"));
   },
 );
 
@@ -249,14 +249,28 @@ test(
   },
 );
 
-test("beeld onder beleid: publiek begint bij Meta", async (urls, zet) => {
-  stelAiBeleidIn({ project: "eendje", momentopname: AI_BELEID });
-  zet({ status: 200, body: { data: [{ b64_json: "iVBORw0KGgo=" }] } });
-  const r = await genereerBeeld({ label: "t", prompt: "x", sleutels: alle });
-  assertEquals(r.provider, "meta");
-  assertEquals(r.gegevens, "publiek");
-  assert(urls[0].includes("meta"));
-});
+test(
+  "beeld onder beleid: publiek begint bij Lovable, Meta erachter",
+  async (urls, zet) => {
+    stelAiBeleidIn({ project: "eendje", momentopname: AI_BELEID });
+    zet({
+      status: 200,
+      body: {
+        choices: [{
+          message: {
+            images: [{
+              image_url: { url: "data:image/png;base64,iVBORw0KGgo=" },
+            }],
+          },
+        }],
+      },
+    });
+    const r = await genereerBeeld({ label: "t", prompt: "x", sleutels: alle });
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.gegevens, "publiek");
+    assert(urls[0].includes("lovable"));
+  },
+);
 
 test(
   "zonder momentopname geldt het noodbeleid: gezondheid enkel naar Claude",

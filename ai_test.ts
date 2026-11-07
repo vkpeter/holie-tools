@@ -17,6 +17,7 @@ import {
   genereerBeeld,
   heeftBeeldInSysteem,
   leesJson,
+  lovableActief,
   schatUsd,
   STANDAARD_MODELLEN,
   taalnaam,
@@ -105,32 +106,75 @@ function metAntwoorden(...antwoorden: Antwoord[]) {
   return { aanroepen, herstel: () => (globalThis.fetch = origineel) };
 }
 
-test("probeert standaard DeepSeek, dan gratis gemini, dan Lovable", async () => {
-  // Sinds 19-09-2026 staat de standaardvolgorde op goedkoop-eerst: DeepSeek is
-  // spotgoedkoop en heeft geen dagplafond, gemini is gratis maar wel geplafonneerd,
-  // Lovable is het betalende vangnet.
+test("probeert standaard gratis gemini, dan Lovable, dan de rest", async () => {
+  // Sinds 7-11-2026 (Peter): Claude, dan gratis, dan Lovable, dan de rest. Zonder
+  // ANTHROPIC_API_KEY is dat gemini eerst, daarna Lovable, daarna DeepSeek.
   const f = metAntwoorden({ content: "ok" });
   try {
     const r = await callAi(vraag, { label: "t", sleutels });
-    assertEquals(r.provider, "deepseek");
-    assert(f.aanroepen[0].url.includes("api.deepseek.com"));
+    assertEquals(r.provider, "gemini");
+    assert(f.aanroepen[0].url.includes("generativelanguage.googleapis.com"));
   } finally {
     f.herstel();
   }
 });
 
-test("gemini staat tussen DeepSeek en Lovable in", async () => {
+test("Lovable staat tussen gemini en DeepSeek in", async () => {
   const f = metAntwoorden(
     { status: 500, content: "" },
-    { content: "van gemini" },
+    { content: "van lovable" },
   );
   try {
     const r = await callAi(vraag, { label: "t", sleutels });
-    assertEquals(r.provider, "gemini");
-    assertEquals(r.model, STANDAARD_MODELLEN.gemini);
-    assert(f.aanroepen[1].url.includes("generativelanguage.googleapis.com"));
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.model, STANDAARD_MODELLEN.lovable);
+    assert(f.aanroepen[1].url.includes("ai.gateway.lovable.dev"));
   } finally {
     f.herstel();
+  }
+});
+
+test("DeepSeek komt pas na gemini en Lovable", async () => {
+  const f = metAntwoorden(
+    { status: 500, content: "" },
+    { status: 500, content: "" },
+    { content: "van deepseek" },
+  );
+  try {
+    const r = await callAi(vraag, { label: "t", sleutels });
+    assertEquals(r.provider, "deepseek");
+    assert(f.aanroepen[2].url.includes("api.deepseek.com"));
+  } finally {
+    f.herstel();
+  }
+});
+
+test("lovableActief: tot en met 13-02-2027, daarna overgeslagen", async () => {
+  assert(lovableActief(new Date("2027-02-13T22:00:00Z")));
+  assert(!lovableActief(new Date("2027-02-14T00:00:00Z")));
+  // Na de grens telt Lovable als "geen sleutel": de keten slaat hem over.
+  const echteNu = Date.now;
+  Date.now = () => Date.parse("2027-03-01T12:00:00Z");
+  const OrigDate = globalThis.Date;
+  // lovableActief() zonder argument gebruikt new Date(): vervang die tijdelijk.
+  globalThis.Date = class extends OrigDate {
+    constructor(...a: unknown[]) {
+      // deno-lint-ignore no-explicit-any
+      super(...(a.length ? a : [Date.now()]) as [any]);
+    }
+  } as DateConstructor;
+  const f = metAntwoorden(
+    { status: 500, content: "" },
+    { content: "van deepseek" },
+  );
+  try {
+    const r = await callAi(vraag, { label: "t", sleutels });
+    assertEquals(r.provider, "deepseek");
+    assert(f.aanroepen.every((a) => !a.url.includes("lovable")));
+  } finally {
+    f.herstel();
+    globalThis.Date = OrigDate;
+    Date.now = echteNu;
   }
 });
 
@@ -140,12 +184,13 @@ test("stuurt het DeepSeek-only thinking-veld nooit naar gemini", async () => {
   // tekst-call op de gratis route. Gemeten 19-09-2026.
   const f = metAntwoorden(
     { status: 500, content: "" },
+    { status: 500, content: "" },
     { content: "ok" },
   );
   try {
     await callAi(vraag, { label: "t", sleutels });
-    assert("thinking" in (f.aanroepen[0].body as Record<string, unknown>));
-    assert(!("thinking" in (f.aanroepen[1].body as Record<string, unknown>)));
+    assert(!("thinking" in (f.aanroepen[0].body as Record<string, unknown>)));
+    assert("thinking" in (f.aanroepen[2].body as Record<string, unknown>));
   } finally {
     f.herstel();
   }
@@ -1051,6 +1096,7 @@ test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", async
       prompt: "een eend",
       formaat: "1792x1024",
       sleutels: sleutelsMetMeta,
+      volgorde: ["meta", "lovable"],
     });
     assertEquals(r.provider, "meta");
     assertEquals(r.model, "muse-image-1.0");
@@ -1066,6 +1112,21 @@ test("beeld: met een Meta-sleutel gaat Meta eerst, in het images-formaat", async
       output_format: "png",
       size: "1792x1024",
     });
+  } finally {
+    f.herstel();
+  }
+});
+
+test("beeld: standaard staat Lovable voor Meta (7-11-2026)", async () => {
+  const f = metBeeld({ dataUrl: PNG_1X1 });
+  try {
+    const r = await genereerBeeld({
+      label: "t",
+      prompt: "x",
+      sleutels: sleutelsMetMeta,
+    });
+    assertEquals(r.provider, "lovable");
+    assertEquals(f.aanroepen.length, 1);
   } finally {
     f.herstel();
   }
@@ -1095,6 +1156,7 @@ test("beeld: een foutstatus bij Meta valt door naar Lovable", async () => {
       label: "t",
       prompt: "x",
       sleutels: sleutelsMetMeta,
+      volgorde: ["meta", "lovable"],
     });
     assertEquals(r.provider, "lovable");
     assertEquals(r.model, STANDAARD_MODELLEN.lovableBeeld[0]);
@@ -1111,6 +1173,7 @@ test("beeld: REGEL 2 geldt per rekening, 402 bij Meta blokkeert Lovable niet", a
       label: "t",
       prompt: "x",
       sleutels: sleutelsMetMeta,
+      volgorde: ["meta", "lovable"],
     });
     assertEquals(r.provider, "lovable");
     assert(f.aanroepen[1].url.includes("ai.gateway.lovable.dev"));
@@ -1125,7 +1188,12 @@ test("beeld: REGEL 2 bij de laatste provider geeft nog altijd een AiQuotumFout",
   try {
     await assertRejects(
       () =>
-        genereerBeeld({ label: "t", prompt: "x", sleutels: sleutelsMetMeta }),
+        genereerBeeld({
+          label: "t",
+          prompt: "x",
+          sleutels: sleutelsMetMeta,
+          volgorde: ["meta", "lovable"],
+        }),
       AiQuotumFout,
     );
     assertEquals(f.aanroepen.length, 2);
@@ -1141,6 +1209,7 @@ test("beeld: een 200 van Meta zonder beeld valt door naar Lovable", async () => 
       label: "t",
       prompt: "x",
       sleutels: sleutelsMetMeta,
+      volgorde: ["meta", "lovable"],
     });
     assertEquals(r.provider, "lovable");
   } finally {
@@ -1153,7 +1222,12 @@ test("beeld: REGEL 1 geldt ook over providers, geen Lovable na een timeout bij M
   try {
     await assertRejects(
       () =>
-        genereerBeeld({ label: "t", prompt: "x", sleutels: sleutelsMetMeta }),
+        genereerBeeld({
+          label: "t",
+          prompt: "x",
+          sleutels: sleutelsMetMeta,
+          volgorde: ["meta", "lovable"],
+        }),
       AiOnbeschikbaar,
     );
     assertEquals(f.aanroepen.length, 1);

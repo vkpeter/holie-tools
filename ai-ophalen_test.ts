@@ -204,6 +204,7 @@ test(
     const r = await callAi([{ role: "user", content: "hoi" }], {
       label: "t",
       sleutels: { anthropic: "a", deepseek: "d" },
+      volgorde: ["anthropic", "deepseek"],
     });
     assertEquals(r.provider, "deepseek");
     assert(urls[1].includes("deepseek"));

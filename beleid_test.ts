@@ -441,7 +441,7 @@ Deno.test("startbeleid: Claude vooraan voor tekst, tot het einde van de voorrang
     project: "eendje",
     nu: NU,
   });
-  assertEquals(u.volgorde, ["anthropic", "deepseek", "gemini", "lovable"]);
+  assertEquals(u.volgorde, ["anthropic", "gemini", "lovable", "deepseek"]);
 });
 
 Deno.test("startbeleid: Foodie mag DeepSeek (testfase), Eendje-gezondheid niet", () => {

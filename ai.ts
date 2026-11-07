@@ -476,9 +476,9 @@ export interface AiOpties extends BeleidOpties {
    */
   responseFormat?: Record<string, unknown>;
   /**
-   * Standaard `["anthropic", "deepseek", "gemini", "lovable"]`: Claude eerst
-   * (Peter, 28-10-2026: Claude vooraan waar hij iets kan betekenen), dan goedkoop,
-   * dan gratis, dan pas betalen. Zonder `ANTHROPIC_API_KEY` wordt Claude
+   * Standaard `["anthropic", "gemini", "lovable", "deepseek"]`: Claude eerst
+   * (Peter, 28-10-2026), dan gratis, dan Lovable (tot `LOVABLE_ACTIEF_TOT`,
+   * 7-11-2026), dan de rest. Zonder `ANTHROPIC_API_KEY` wordt Claude
    * overgeslagen en loopt alles als voorheen.
    */
   volgorde?: AiProvider[];
@@ -914,9 +914,9 @@ const CHAT_PROVIDERS: readonly AiProvider[] = [
 /** De providers van de standaardketen van `callAi`. */
 export const TEKST_PROVIDERS: AiProvider[] = [
   "anthropic",
-  "deepseek",
   "gemini",
   "lovable",
+  "deepseek",
 ];
 
 /**
@@ -1263,6 +1263,20 @@ export async function kiesAiVolgorde(
 }
 
 /**
+ * Laatste dag waarop Lovable in de ketens zit (Peter, 7-11-2026). Veel sites zijn van
+ * Lovable weg en kosten daar geen credits meer, dus de gateway mag tot dan terug als
+ * betalende terugval, na Claude en de gratis Gemini. Na deze datum telt Lovable als
+ * "geen sleutel" en wordt hij overal overgeslagen, zonder dat een app moet wijzigen.
+ * Peter herevalueert de volgorde op 10-02-2027 (Todoist).
+ */
+export const LOVABLE_ACTIEF_TOT = "2027-02-13";
+
+/** Is de Lovable-gateway nog toegelaten? Tot en met `LOVABLE_ACTIEF_TOT` (Brussel). */
+export function lovableActief(nu: Date = new Date()): boolean {
+  return nu.getTime() <= Date.parse(`${LOVABLE_ACTIEF_TOT}T23:59:59+01:00`);
+}
+
+/**
  * De providerlijst voor één aanroep. Onder beleid volgens `kiesProviders`; zonder project de
  * oude werking (volgorde, zonder sleutel overslaan), maar met de negatieve cache.
  */
@@ -1276,7 +1290,10 @@ async function kiesVoorAanroep(
   standaard: readonly AiProvider[],
   pakket: readonly AiProvider[],
 ): Promise<Keuze> {
-  const sleutelVan = (p: string) => leesSleutel(p as AiProvider, opties);
+  const sleutelVan = (p: string) =>
+    p === "lovable" && !lovableActief()
+      ? undefined
+      : leesSleutel(p as AiProvider, opties);
   const project = aiProject(opties);
   if (!project) {
     if (!gewaarschuwdZonderBeleid) {
@@ -2331,11 +2348,11 @@ async function transcribeerAudioKern(
 }
 
 /**
- * Providers die beeld kunnen, in volgorde. DeepSeek is tekst-only. Meta staat
- * eerst omdat het per beeld het goedkoopst is (zie `metaBeeld`); ontbreekt de
- * sleutel, dan blijft enkel Lovable over.
+ * Providers die beeld kunnen, in volgorde. DeepSeek is tekst-only. Sinds
+ * 7-11-2026 staat Lovable eerst en Meta (Muse) erachter (Peter: volgorde Claude,
+ * gratis, Lovable, rest); na `LOVABLE_ACTIEF_TOT` blijft enkel Meta over.
  */
-export const BEELD_PROVIDERS: AiProvider[] = ["meta", "lovable"];
+export const BEELD_PROVIDERS: AiProvider[] = ["lovable", "meta"];
 
 export interface BeeldOpties extends BeleidOpties {
   /** Naam in de logregels, bv. "telegram-webhook". */

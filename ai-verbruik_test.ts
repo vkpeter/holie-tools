@@ -289,6 +289,7 @@ test("genereerBeeld meldt de vaste prijs van Meta", async (_o, zet) => {
     label: "t",
     prompt: "a duck",
     sleutels: alle,
+    volgorde: ["meta", "lovable"],
   });
   assertEquals(r.provider, "meta");
   const rij = aiVerbruikWachtrij();
