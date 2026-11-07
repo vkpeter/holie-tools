@@ -487,6 +487,15 @@ export interface AiOpties extends BeleidOpties {
   lovableModel?: string;
   /** Standaard `claude-haiku-5-5`. */
   anthropicModel?: string;
+  /**
+   * Prompt caching voor Claude (sinds 0.30.0). Standaard `"5m"`: het vaste deel (tools + system)
+   * krijgt een breakpoint, zodat een herhaalde aanroep het voor een tiende van de prijs leest.
+   * Zet `"1h"` als dezelfde aanroep meer dan 5 minuten maar minder dan een uur uit elkaar
+   * herhaalt (schrijven kost dan 2x i.p.v. 1,25x), en `false` om het uit te zetten.
+   * Alles wat per aanroep verschilt (datum, gebruikersdata) hoort in het user-bericht, niet in
+   * een system-bericht: elk verschil in het vaste deel maakt de cache ongeldig.
+   */
+  cacheTtl?: "5m" | "1h" | false;
   /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
   /** Laat DeepSeek wél nadenken. Standaard uit, zie de modulekop. */
@@ -657,7 +666,16 @@ export function bouwAnthropicBody(opties: {
   tools?: unknown[];
   toolChoice?: unknown;
   responseFormat?: Record<string, unknown>;
+  cacheTtl?: "5m" | "1h" | false;
 }): Record<string, unknown> {
+  const cacheTtl = opties.cacheTtl === undefined ? "5m" : opties.cacheTtl;
+  const markering = cacheTtl
+    ? {
+      cache_control: cacheTtl === "1h"
+        ? { type: "ephemeral", ttl: "1h" }
+        : { type: "ephemeral" },
+    }
+    : {};
   const systeem: string[] = [];
   const berichten: { role: string; content: Blok[] }[] = [];
   const voegToe = (role: string, blokken: Blok[]) => {
@@ -740,7 +758,18 @@ export function bouwAnthropicBody(opties: {
       "Antwoord uitsluitend met één geldig JSON-object, zonder uitleg en zonder codeblok.",
     );
   }
-  if (systeem.length > 0) body.system = systeem.join("\n\n");
+  if (systeem.length > 0) {
+    // Eén breakpoint op het einde van het vaste deel dekt tools + system (volgorde
+    // tools > system > messages). Onder het minimum van het model (512 tokens voor
+    // Haiku 5.5 en Sonnet 5.5) wordt er stil niets gecachet: geen fout, geen meerkost.
+    body.system = cacheTtl
+      ? [{ type: "text", text: systeem.join("\n\n"), ...markering }]
+      : systeem.join("\n\n");
+  } else if (cacheTtl && Array.isArray(body.tools) && body.tools.length > 0) {
+    // Geen system, wel tools: het breakpoint op de laatste tool.
+    const tools = body.tools as Blok[];
+    tools[tools.length - 1] = { ...tools[tools.length - 1], ...markering };
+  }
   return body;
 }
 
@@ -1691,6 +1720,7 @@ async function callAiKern(
         tools: metTools ? opties.tools : undefined,
         toolChoice: opties.toolChoice,
         responseFormat: opties.responseFormat,
+        cacheTtl: opties.cacheTtl,
       })
       : naam === "deepseek"
       ? bouwDeepseekBody({
@@ -2894,8 +2924,23 @@ export function schatUsd(
     geschat = true;
   }
 
+  // Prompt caching (Anthropic): een lees kost 0,1x het inputtarief, een schrijf 1,25x
+  // (5 minuten) of 2x (1 uur). `input_tokens` telt enkel wat NIET uit/naar de cache ging.
+  // Opus 5.5 leest voor 0,05x; dat verschil is hier bewust niet uitgesplitst.
+  const lees = Number(usage?.cache_read_input_tokens ?? 0);
+  const cr = usage?.cache_creation as
+    | { ephemeral_1h_input_tokens?: number }
+    | undefined;
+  const schrijfTotaal = Number(usage?.cache_creation_input_tokens ?? 0);
+  const schrijf1u = Math.min(
+    schrijfTotaal,
+    Number(cr?.ephemeral_1h_input_tokens ?? 0),
+  );
+  const cacheUsd = tarief.input *
+    (lees * 0.1 + (schrijfTotaal - schrijf1u) * 1.25 + schrijf1u * 2);
+
   return {
-    usd: input * tarief.input + output * tarief.output,
+    usd: input * tarief.input + output * tarief.output + cacheUsd,
     input,
     output,
     geschat,

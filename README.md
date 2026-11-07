@@ -108,6 +108,24 @@ met een 400 - en dat is een 4xx, dus de keten herkanst niet eens.
 Een 429 van de gratis route wordt **niet** herkanst: een leeg dagquotum is
 morgen pas over, dus de keten valt meteen door.
 
+## Nieuw in 0.29.1: prompt caching voor Claude
+
+- `callAi` zet bij Claude een `cache_control`-breakpoint op het einde van het
+  vaste deel (tools + system). Een herhaalde aanroep binnen 5 minuten leest dat
+  deel voor 0,1x de prijs; onder het minimum van het model (512 tokens voor
+  Haiku 5.5 en Sonnet 5.5) gebeurt er stil niets. Geen wijziging in de aanroep
+  nodig.
+- Optie `cacheTtl`: `"5m"` (standaard), `"1h"` als dezelfde aanroep meer dan 5
+  minuten maar minder dan een uur uit elkaar herhaalt (schrijven kost dan 2x),
+  of `false` om uit te zetten.
+- Zet wat per aanroep verschilt (datum, gebruikersdata) in het user-bericht. Elk
+  verschil in een system-bericht maakt de cache ongeldig.
+- `schatUsd` telt `cache_read_input_tokens` (0,1x) en
+  `cache_creation_input_tokens` (1,25x, of 2x voor het uur-deel) mee. Controle:
+  `usage.cache_read_input_tokens` moet vanaf de tweede aanroep groter dan 0
+  zijn.
+- Python: `holie_ai_beleid.schat_usd` doet hetzelfde.
+
 ## Nieuw in 0.29.0: ogg-spraak via Gemini, denkruimte voor Claude
 
 - **ogg bij Gemini via de eigen route.** Google's OpenAI-compatibele route

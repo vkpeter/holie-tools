@@ -1722,7 +1722,11 @@ test("Claude: system, beeld en toolgeschiedenis in Messages-vorm", () => {
       { role: "tool", tool_call_id: "c1", content: "gevonden" },
     ],
   });
-  assertEquals(body.system, "Je bent kort.");
+  assertEquals(body.system, [{
+    type: "text",
+    text: "Je bent kort.",
+    cache_control: { type: "ephemeral" },
+  }]);
   assertEquals(body.max_tokens, 16000);
   const m = body.messages as {
     role: string;
@@ -1769,8 +1773,73 @@ test("Claude: nooit temperature, nooit een afgedwongen tool", () => {
     description: "d",
     input_schema: { type: "object" },
   }]);
-  assert(String(body.system).includes("zoek"));
-  assert(String(body.system).includes("JSON"));
+  const sys = JSON.stringify(body.system);
+  assert(sys.includes("zoek"));
+  assert(sys.includes("JSON"));
+});
+
+test("Claude: cache_control op het einde van het vaste deel, 1u op verzoek, uit met false", () => {
+  const msgs = [
+    { role: "system", content: "Vast deel." },
+    { role: "user", content: "variabel: 2026-11-07" },
+  ];
+  const b5 = bouwAnthropicBody({ model: "claude-haiku-5-5", messages: msgs });
+  assertEquals(b5.system, [
+    { type: "text", text: "Vast deel.", cache_control: { type: "ephemeral" } },
+  ]);
+  // Het variabele deel (user) draagt nooit een breakpoint.
+  assert(!JSON.stringify(b5.messages).includes("cache_control"));
+  const b1 = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: msgs,
+    cacheTtl: "1h",
+  });
+  assertEquals(
+    (b1.system as { cache_control: unknown }[])[0].cache_control,
+    { type: "ephemeral", ttl: "1h" },
+  );
+  const uit = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: msgs,
+    cacheTtl: false,
+  });
+  assertEquals(uit.system, "Vast deel.");
+});
+
+test("Claude: zonder system krijgt de laatste tool het breakpoint", () => {
+  const body = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: vraag,
+    tools: [
+      {
+        type: "function",
+        function: { name: "a", parameters: { type: "object" } },
+      },
+      {
+        type: "function",
+        function: { name: "b", parameters: { type: "object" } },
+      },
+    ],
+  });
+  const t = body.tools as Record<string, unknown>[];
+  assert(!("cache_control" in t[0]));
+  assertEquals(t[1].cache_control, { type: "ephemeral" });
+});
+
+test("schatUsd telt cache-lees (0,1x) en cache-schrijf (1,25x / 2x) mee", () => {
+  const basis = schatUsd("claude-haiku-5-5", {
+    prompt_tokens: 100,
+    completion_tokens: 10,
+  }).usd;
+  const met = schatUsd("claude-haiku-5-5", {
+    prompt_tokens: 100,
+    completion_tokens: 10,
+    cache_read_input_tokens: 1000,
+    cache_creation_input_tokens: 2000,
+    cache_creation: { ephemeral_1h_input_tokens: 1000 },
+  }).usd;
+  const verwacht = (1000 * 0.1 + 1000 * 1.25 + 1000 * 2) * (0.10 / 1_000_000);
+  assert(Math.abs(met - basis - verwacht) < 1e-12);
 });
 
 test("Claude: geeft tool calls terug in OpenAI-vorm", async () => {

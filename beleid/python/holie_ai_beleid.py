@@ -430,7 +430,12 @@ def schat_usd(model: str, usage: dict | None) -> float:
         return 0.0
     i = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
     o = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
-    return float(i) * tarief[0] + float(o) * tarief[1]
+    # Prompt caching (Anthropic): lezen 0,1x, schrijven 1,25x (5 min) of 2x (1 uur) het inputtarief.
+    lees = usage.get("cache_read_input_tokens", 0) or 0
+    schrijf = usage.get("cache_creation_input_tokens", 0) or 0
+    schrijf_1u = min(schrijf, (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens", 0) or 0)
+    cache = tarief[0] * (lees * 0.1 + (schrijf - schrijf_1u) * 1.25 + schrijf_1u * 2)
+    return float(i) * tarief[0] + float(o) * tarief[1] + cache
 
 
 def _brusselse_dag() -> str:
