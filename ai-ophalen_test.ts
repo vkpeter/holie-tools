@@ -177,7 +177,7 @@ test(
   "callAi volgt het opgehaalde beleid: Claude uit = meteen DeepSeek",
   async (urls, zet) => {
     const k = await sleutelpaar();
-    const b = metVolgnummer(7);
+    const b = metVolgnummer(NIEUW);
     b.providers.anthropic.uit = {
       reden: "account geblokt",
       wie: "test",

@@ -444,12 +444,12 @@ Deno.test("startbeleid: Claude vooraan voor tekst, tot het einde van de voorrang
   assertEquals(u.volgorde, ["anthropic", "gemini", "lovable", "deepseek"]);
 });
 
-Deno.test("startbeleid: Foodie mag DeepSeek (testfase), Eendje-gezondheid niet", () => {
-  assert(
+Deno.test("startbeleid: Foodie-gezondheid zonder DeepSeek en Lovable (FOO-228, v9), Eendje-gezondheid ook niet", () => {
+  const foodie =
     kiesProviders(AI_BELEID, { type: "tekst", project: "foodie", nu: NU })
-      .volgorde
-      .includes("deepseek"),
-  );
+      .volgorde;
+  assert(!foodie.includes("deepseek"));
+  assert(!foodie.includes("lovable"));
   assert(
     !kiesProviders(AI_BELEID, {
       type: "tekst",
