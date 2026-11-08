@@ -33,6 +33,23 @@ as $$
   )
 $$;
 
+-- Zelfde, maar de zero-width joiner (U+200D) en de emoji-tagtekens blijven
+-- staan, zodat samengestelde emoji in vrije tekst heel blijven. Voor norm_regel.
+create or replace function public.strip_cf_tekst(t text)
+returns text
+language sql
+immutable
+parallel safe
+set search_path = ''
+as $$
+  select regexp_replace(
+    t,
+    '[\u00AD\u0600-\u0605\u061C\u06DD\u070F\u0890\u0891\u08E2\u180E\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB\U000110BD\U000110CD\U00013430-\U0001343F\U0001BCA0-\U0001BCA3\U0001D173-\U0001D17A\U000E0001]',
+    '',
+    'g'
+  )
+$$;
+
 -- Tekst van een regel: Cf weg, elke soort spatie (NBSP, regeleinden, tabs) een
 -- gewone spatie, dubbele spaties samen, begin en einde af.
 create or replace function public.norm_regel(t text)
@@ -44,7 +61,7 @@ set search_path = ''
 as $$
   select btrim(
     regexp_replace(
-      public.strip_cf(t),
+      public.strip_cf_tekst(t),
       '[\s\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+',
       ' ',
       'g'

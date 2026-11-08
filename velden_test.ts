@@ -646,3 +646,10 @@ Deno.test("VELDEN_SQL: de afspraken staan erin", () => {
   // Enkel ASCII: onzichtbare tekens horen als escape in het bestand.
   assert(Array.from(VELDEN_SQL).every((c) => c.charCodeAt(0) < 128));
 });
+
+Deno.test("schoonTekst en schoonRegel laten samengestelde emoji heel", () => {
+  const familie = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+  assertEquals(schoonTekst(`‪Hallo ${familie}‬`), `Hallo ${familie}`);
+  assertEquals(schoonRegel(`‎Hallo ${familie}`), `Hallo ${familie}`);
+  assertEquals(normaliseerEmail("a‍@b.be"), "a@b.be");
+});
