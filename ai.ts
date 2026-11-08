@@ -1917,11 +1917,13 @@ async function callAiKern(
 }
 
 /**
- * Providers die spraak naar tekst kunnen. Vandaag enkel Lovable, maar dit staat
- * als lijst zodat een tweede provider erbij kan zonder dat een aanroeper wijzigt.
- */
-/**
- * Providers die spraak aankunnen, in volgorde van voorkeur.
+ * Providers die spraak aankunnen, in volgorde van voorkeur, ZONDER beleid.
+ *
+ * Onder beleid (project gezet) beslist `beleid/ai-beleid.json` de volgorde
+ * (`basis["audio-in"]` plus `voorrang`), niet deze lijst. Sinds beleid v11
+ * (8 nov 2026) staat Lovable eerst voor project `podcast` (ASR op de VPS) en
+ * blijft Gemini rechtstreeks erachter. De lokale Whisper staat als niet-
+ * aanroepbare provider in het beleid: de laatste terugval, buiten deze keten.
  *
  * `gemini` staat vóór `lovable` omdat Google's eigen API spraak GRATIS doet
  * (gemeten 19-09-2026) terwijl dezelfde modellen via de Lovable-gateway per
@@ -2054,9 +2056,9 @@ function audioSysteem(domein: string): string {
  * Zet spraak om naar tekst.
  *
  * ⛔ Dit loopt NIET via `callAi`: die keten spreekt providers aan die audio niet
- * kennen, en DeepSeek is er daar één van. Zolang `AUDIO_PROVIDERS` enkel Lovable
- * bevat, is dit de plek waar de app haar Gemini-verbruik voor spraak centraal
- * beheert - niet elke aanroeper apart.
+ * kennen, en DeepSeek is er daar één van. Dit is de ene plek waar spraak naar
+ * tekst loopt; de volgorde van de providers komt uit het beleid (type `audio-in`),
+ * niet uit de aanroeper.
  *
  * ⚠️ Het model aanvaardt enkel de formaten uit `AUDIO_FORMATEN`. Geef je iets
  * anders (`webm`, `mp4`), dan weigert de gateway dat niet netjes maar VERZINT ze

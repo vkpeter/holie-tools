@@ -227,6 +227,89 @@ test(
   },
 );
 
+/**
+ * Het podcastbeleid met de voorrang van v11, maar zonder einddatum: de test mag niet
+ * breken als de voorrang afloopt. Dat de voorrang in de momentopname staat, toetst
+ * een aparte test.
+ */
+function podcastBeleid() {
+  const b = structuredClone(AI_BELEID);
+  for (const v of b.voorrang ?? []) {
+    if (v.project === "podcast") v.tot = "2099-12-31";
+  }
+  return b;
+}
+
+Deno.test("beleid v11: podcast-asr heeft Lovable-voorrang voor audio-in", () => {
+  const v = (AI_BELEID.voorrang ?? []).find((x) =>
+    x.project === "podcast" && x.provider === "lovable"
+  );
+  assert(v, "voorrang voor podcast ontbreekt");
+  assertEquals(v.types, ["audio-in"]);
+  assert(
+    AI_BELEID.basis["audio-in"]?.includes("gemini"),
+    "gemini blijft terugval",
+  );
+});
+
+test(
+  "spraak onder beleid: podcast begint bij Lovable (Gemini via de gateway)",
+  async (urls, zet) => {
+    stelAiBeleidIn({ project: "podcast", momentopname: podcastBeleid() });
+    zet(chatOk("welkom terug"));
+    const r = await transcribeerAudio({
+      label: "podcast-asr",
+      base64: "AAAA",
+      formaat: "mp3",
+      sleutels: alle,
+    });
+    assertEquals(r.provider, "lovable");
+    assertEquals(r.type, "audio-in");
+    assertEquals(r.gegevens, "publiek");
+    assertEquals(r.terugval, false);
+    assert(urls[0].includes("ai.gateway.lovable.dev"));
+  },
+);
+
+test(
+  "spraak onder beleid: podcast valt terug op Gemini als Lovable faalt",
+  async (urls, zet) => {
+    stelAiBeleidIn({ project: "podcast", momentopname: podcastBeleid() });
+    // Lovable heeft twee audiomodellen: beide 500, dan Gemini rechtstreeks.
+    zet(
+      { status: 500, body: { error: "stuk" } },
+      { status: 500, body: { error: "stuk" } },
+      chatOk("welkom terug"),
+    );
+    const r = await transcribeerAudio({
+      label: "podcast-asr",
+      base64: "AAAA",
+      formaat: "mp3",
+      sleutels: alle,
+    });
+    assertEquals(r.provider, "gemini");
+    assertEquals(r.terugval, true);
+    assert(urls[0].includes("lovable"));
+    assert(urls[urls.length - 1].includes("generativelanguage"));
+  },
+);
+
+test(
+  "spraak onder beleid: de lokale Whisper wordt nooit door de keten gekozen",
+  async (_urls, zet) => {
+    stelAiBeleidIn({ project: "podcast", momentopname: podcastBeleid() });
+    zet({ status: 500, body: { error: "stuk" } });
+    await assertRejects(() =>
+      transcribeerAudio({
+        label: "podcast-asr",
+        base64: "AAAA",
+        formaat: "mp3",
+        sleutels: { ...alle, whisper: "x" } as Record<string, string>,
+      })
+    );
+  },
+);
+
 test(
   "beeld onder beleid: persoonsgegevens mogen niet naar Meta",
   async (urls, zet) => {

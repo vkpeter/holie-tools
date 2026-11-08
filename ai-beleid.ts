@@ -94,6 +94,21 @@ export const AI_BELEID: AiBeleid = {
       "project": "billara-telefoon",
       "provider": "anthropic",
     },
+    {
+      "provider": "lovable",
+      "project": "podcast",
+      "types": [
+        "audio-in",
+      ],
+      "van": "2026-11-08",
+      "tot": "2027-02-13",
+      "wie": "Peter",
+      "datum": "2026-11-08",
+      "reden":
+        "Podcast-ASR op de VPS, eerste fase: Gemini via de Lovable-gateway vooraan, Gemini rechtstreeks als terugval. Einddatum = Lovable actief tot 13 feb 2027.",
+      "bron":
+        "Peter in de chat, 8 nov 2026: 'gemini+lovable vooraan'; toets 8 nov 2026 (input_audio via de gateway, HTTP 200)",
+    },
   ],
   "contexten": {
     "roundbook": {
@@ -297,9 +312,18 @@ export const AI_BELEID: AiBeleid = {
         "tts",
       ],
     },
+    "whisper": {
+      "naam": "Whisper lokaal (faster-whisper op de laptop)",
+      "aanroepbaar": false,
+      "tier":
+        "laatste terugval buiten de keten: podcast-worker --asr-backend lokaal op de laptop, met de hand",
+      "capaciteiten": [
+        "audio-in",
+      ],
+    },
   },
-  "uitgegeven": "2026-11-07",
-  "volgnummer": 10,
+  "uitgegeven": "2026-11-08",
+  "volgnummer": 11,
   "toelatingen": [
     {
       "wie": "Peter",
@@ -639,6 +663,22 @@ export const AI_BELEID: AiBeleid = {
       "gegevens": "gezondheid",
       "provider": "anthropic",
       "grondslag": "toestemming (art. 9.2.a), versie 2026-11-01.v2",
+    },
+    {
+      "wie": "Peter",
+      "datum": "2026-11-08",
+      "provider": "whisper",
+      "gegevens": "publiek",
+      "status": "onderbouwd",
+      "reden": "lokaal, niets verlaat de laptop",
+    },
+    {
+      "wie": "Peter",
+      "datum": "2026-11-08",
+      "provider": "whisper",
+      "gegevens": "prive-peter",
+      "status": "onderbouwd",
+      "reden": "lokaal, niets verlaat de laptop",
     },
   ],
   "standaard_gegevens": "persoon",
