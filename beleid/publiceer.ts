@@ -18,6 +18,7 @@ import {
   BELEID_URL,
   controleerEnvelop,
   ondertekenBeleid,
+  publiekBeleid,
   valideerBeleid,
 } from "../beleid.ts";
 
@@ -116,7 +117,7 @@ export async function publiceerUitTickbook(
     };
   }
 
-  const envelop = await ondertekenBeleid(beleid, o.sleutel);
+  const envelop = await ondertekenBeleid(publiekBeleid(beleid), o.sleutel);
   await controleerEnvelop(envelop, o.publiekeSleutel); // past bij de publieke sleutel?
   const r = await f(o.beleidUrl ?? BELEID_URL, {
     method: "PUT",
@@ -127,7 +128,11 @@ export async function publiceerUitTickbook(
   log(`beleid.holie.be: ${r.status} ${antwoord}`);
   if (!r.ok) throw new Error(`publiceren mislukt: HTTP ${r.status}`);
 
-  const bevestiging = await post({ actie: "laptop_bevestig", envelop });
+  const bevestiging = await post({
+    actie: "laptop_bevestig",
+    envelop,
+    volledig: beleid,
+  });
   if (!bevestiging.ok) {
     log(
       `Tickbook bevestigde nog niet (live ${bevestiging.live_volgnummer}, status ${bevestiging.status}); het scherm neemt het over bij de volgende lezing. ${
@@ -144,7 +149,7 @@ export async function publiceerUitTickbook(
 
 async function publiceerBestand(bron: string | URL, sleutel: string) {
   const beleid = valideerBeleid(JSON.parse(await Deno.readTextFile(bron)));
-  const envelop = await ondertekenBeleid(beleid, sleutel);
+  const envelop = await ondertekenBeleid(publiekBeleid(beleid), sleutel);
   await controleerEnvelop(envelop); // past bij de publieke sleutel in het pakket?
   const r = await fetch(BELEID_URL, {
     method: "PUT",
@@ -159,10 +164,18 @@ async function publiceerBestand(bron: string | URL, sleutel: string) {
     const b = await fetch(TICKBOOK_AI_BELEID, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ actie: "laptop_bevestig", envelop }),
+      body: JSON.stringify({
+        actie: "laptop_bevestig",
+        envelop,
+        volledig: beleid,
+      }),
     });
     const j = await b.json().catch(() => ({}));
-    console.log(`Tickbook: HTTP ${b.status}, ok=${j?.ok ?? false}, status=${j?.status ?? "?"}`);
+    console.log(
+      `Tickbook: HTTP ${b.status}, ok=${j?.ok ?? false}, status=${
+        j?.status ?? "?"
+      }`,
+    );
   } catch (e) {
     console.log(`Tickbook niet bereikt: ${(e as Error).message}`);
   }

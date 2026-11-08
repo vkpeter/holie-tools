@@ -5,9 +5,9 @@
  *   PUT  /ai-beleid.json                             nieuw envelop; enkel aanvaard als de
  *                                                    handtekening klopt en het volgnummer
  *                                                    hoger is dan het huidige
- *   GET  /lezers                                     per project: pakketversie, volgnummer
+ *   GET  /lezers                                     (met leessleutel) per project: pakketversie, volgnummer
  *                                                    en wanneer het laatst gelezen werd
- *   GET  /historie/<volgnummer>                      een ouder envelop
+ *   GET  /historie/<volgnummer>                      (met leessleutel) een ouder envelop
  *   POST /verbruik                                   dagregels van @holie/tools (>= 0.26.0),
  *                                                    opgeteld in D1; zonder geheim, begrensd
  *   GET  /verbruik?van=&tot=                         de dagteller, enkel met
@@ -227,16 +227,21 @@ async function gelijk(a, b) {
   return v === 0;
 }
 
-export async function leesVerbruik(request, env) {
-  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+/** 401 tenzij `Authorization: Bearer <VERBRUIK_LEESSLEUTEL>`; null als het mag. */
+export async function leesWeigering(request, env) {
   const sleutel = env.VERBRUIK_LEESSLEUTEL;
   const kop = request.headers.get("authorization") || "";
-  if (!sleutel || !kop.startsWith("Bearer ")) {
-    return antwoord({ fout: "niet toegelaten" }, 401);
-  }
-  if (!(await gelijk(kop.slice(7), sleutel))) {
-    return antwoord({ fout: "niet toegelaten" }, 401);
-  }
+  if (
+    !sleutel || !kop.startsWith("Bearer ") ||
+    !(await gelijk(kop.slice(7), sleutel))
+  ) return antwoord({ fout: "niet toegelaten" }, 401);
+  return null;
+}
+
+export async function leesVerbruik(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const geweigerd = await leesWeigering(request, env);
+  if (geweigerd) return geweigerd;
   const url = new URL(request.url);
   const van = url.searchParams.get("van") || brusselseDag(-35);
   const tot = url.searchParams.get("tot") || brusselseDag(1);
@@ -315,6 +320,8 @@ export default {
     }
 
     if (pad === "/lezers" && request.method === "GET") {
+      const geweigerd = await leesWeigering(request, env);
+      if (geweigerd) return geweigerd;
       const lijst = await env.BELEID.list({ prefix: "lezer:" });
       const lezers = [];
       for (const k of lijst.keys) {
@@ -326,6 +333,8 @@ export default {
 
     const historie = pad.match(/^\/historie\/(\d+)$/);
     if (historie && request.method === "GET") {
+      const geweigerd = await leesWeigering(request, env);
+      if (geweigerd) return geweigerd;
       const w = await env.BELEID.get(`historie:${historie[1]}`);
       return w ? antwoord(w) : antwoord({ fout: "onbekend volgnummer" }, 404);
     }
@@ -337,17 +346,6 @@ export default {
       return await leesVerbruik(request, env);
     }
 
-    if (pad === "/") {
-      return antwoord({
-        dienst: "holie-ai-beleid",
-        paden: [
-          "/ai-beleid.json",
-          "/lezers",
-          "/historie/<volgnummer>",
-          "/verbruik",
-        ],
-      });
-    }
     return antwoord({ fout: "niet gevonden" }, 404);
   },
 };

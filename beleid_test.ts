@@ -5,6 +5,7 @@ import {
   geldendeToelating,
   kiesProviders,
   NOODBELEID,
+  publiekBeleid,
   valideerBeleid,
   voorrangActief,
 } from "./beleid.ts";
@@ -517,4 +518,42 @@ Deno.test("TARIEVEN kent Sonnet en Opus, ook in de ruwe Anthropic-vorm", () => {
     schatUsd("claude-opus-5-5", { prompt_tokens: 1_000_000 }).usd,
     4,
   );
+});
+
+Deno.test("publiekBeleid: geen interne velden, wie enkel bij uit, rest ongemoeid", () => {
+  const b = structuredClone(AI_BELEID) as AiBeleid;
+  const p = publiekBeleid(b);
+  const tekst = JSON.stringify(p);
+  for (
+    const veld of [
+      "bron",
+      "omschrijving",
+      "gemeld_aan_klant",
+      "grondslag",
+      "herzien",
+      "dataprofiel",
+      "tier",
+    ]
+  ) {
+    assertEquals(tekst.includes(`"${veld}":`), false, veld);
+  }
+  assertEquals(tekst.includes('"wie":'), false);
+  valideerBeleid(p);
+  assertEquals(p.volgnummer, b.volgnummer);
+  assertEquals(p.basis, b.basis);
+  const met = structuredClone(b);
+  met.providers.gemini.uit = { reden: "r", wie: "Peter", datum: "2026-11-08" };
+  assertEquals(publiekBeleid(met).providers.gemini.uit, {
+    reden: "r",
+    wie: "Peter",
+    datum: "2026-11-08",
+  });
+  // Dezelfde keuzes: een geschrapte versie beslist hetzelfde.
+  const nu = new Date("2026-11-08T12:00:00Z");
+  for (const type of ["tekst", "audio-in", "beeld-in"] as const) {
+    assertEquals(
+      kiesProviders(p, { type, project: "podcast", nu }).volgorde,
+      kiesProviders(b, { type, project: "podcast", nu }).volgorde,
+    );
+  }
 });

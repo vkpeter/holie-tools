@@ -192,3 +192,38 @@ Deno.test("regelFout: venster van twee dagen terug tot morgen", () => {
     "dag buiten venster",
   );
 });
+
+Deno.test("/lezers en /historie vragen de leessleutel, / toont geen padenlijst", async () => {
+  const kv = new Map<string, string>([["historie:14", "{}"], [
+    "lezer:x",
+    '{"project":"x"}',
+  ]]);
+  const env = {
+    VERBRUIK_LEESSLEUTEL: "geheim",
+    BELEID: {
+      get: (k: string) => Promise.resolve(kv.get(k) ?? null),
+      list: () => Promise.resolve({ keys: [{ name: "lezer:x" }] }),
+    },
+  };
+  const ctx = { waitUntil() {} };
+  const vraag = (pad: string, h: Record<string, string> = {}) =>
+    worker.fetch(
+      new Request(`https://beleid.test${pad}`, { headers: h }),
+      env,
+      ctx,
+    );
+  for (const pad of ["/lezers", "/historie/14"]) {
+    assertEquals((await vraag(pad)).status, 401);
+    assertEquals(
+      (await vraag(pad, { authorization: "Bearer fout" })).status,
+      401,
+    );
+    assertEquals(
+      (await vraag(pad, { authorization: "Bearer geheim" })).status,
+      200,
+    );
+  }
+  const wortel = await vraag("/");
+  assertEquals(wortel.status, 404);
+  assertEquals((await wortel.text()).includes("lezers"), false);
+});

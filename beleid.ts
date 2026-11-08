@@ -476,6 +476,41 @@ export function kiesProviders(
   };
 }
 
+/** Velden die geen lezer gebruikt en die intern zijn (vaultpaden, notities, dossiers). */
+const INTERNE_VELDEN = new Set([
+  "bron",
+  "omschrijving",
+  "gemeld_aan_klant",
+  "grondslag",
+  "herzien",
+  "dataprofiel",
+  "tier",
+]);
+
+/**
+ * Het beleid zoals het publiek op beleid.holie.be komt: zonder interne velden en zonder `wie`,
+ * behalve in `providers.<naam>.uit` (de lezers tonen "uitgezet (reden, wie datum)"). `reden`,
+ * `datum`, `geldig_tot` en `toestemming_vereist` blijven: de lezers gebruiken ze. De volledige
+ * versie blijft in Tickbook; de handtekening gaat over deze publieke vorm.
+ */
+export function publiekBeleid(beleid: AiBeleid): AiBeleid {
+  const loop = (x: unknown, pad: string[]): unknown => {
+    if (Array.isArray(x)) return x.map((e) => loop(e, pad));
+    if (!x || typeof x !== "object") return x;
+    const uit: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(x)) {
+      if (INTERNE_VELDEN.has(k)) continue;
+      if (
+        k === "wie" &&
+        !(pad.length === 3 && pad[0] === "providers" && pad[2] === "uit")
+      ) continue;
+      uit[k] = loop(v, [...pad, k]);
+    }
+    return uit;
+  };
+  return loop(beleid, []) as AiBeleid;
+}
+
 /**
  * Controleert de vorm van een beleid (bv. een opgehaald bestand). Gooit een `TypeError` met
  * de eerste fout; geeft het beleid terug als het klopt.
