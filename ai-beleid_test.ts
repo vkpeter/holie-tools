@@ -228,9 +228,9 @@ test(
 );
 
 /**
- * Het podcastbeleid met de voorrang van v11, maar zonder einddatum: de test mag niet
- * breken als de voorrang afloopt. Dat de voorrang in de momentopname staat, toetst
- * een aparte test.
+ * Het podcastbeleid uit de momentopname, met een eventuele einddatum op de podcast-
+ * voorrang weggezet: de test mag niet breken als een voorrang afloopt. Dat de voorrang
+ * in de momentopname staat, toetst een aparte test.
  */
 function podcastBeleid() {
   const b = structuredClone(AI_BELEID);
@@ -240,12 +240,22 @@ function podcastBeleid() {
   return b;
 }
 
-Deno.test("beleid v11: podcast-asr heeft Lovable-voorrang voor audio-in", () => {
+Deno.test("beleid v12: podcast-asr eerst gratis Gemini, Lovable erachter", () => {
   const v = (AI_BELEID.voorrang ?? []).find((x) =>
-    x.project === "podcast" && x.provider === "lovable"
+    x.project === "podcast" && x.provider === "gemini"
   );
   assert(v, "voorrang voor podcast ontbreekt");
   assertEquals(v.types, ["audio-in"]);
+  assert(
+    !(AI_BELEID.voorrang ?? []).some((x) =>
+      x.project === "podcast" && x.provider === "lovable"
+    ),
+    "de Lovable-voorrang van v11 is weg",
+  );
+  assert(
+    AI_BELEID.basis["audio-in"]?.includes("lovable"),
+    "lovable blijft terugval",
+  );
   assert(
     AI_BELEID.basis["audio-in"]?.includes("gemini"),
     "gemini blijft terugval",
@@ -253,7 +263,7 @@ Deno.test("beleid v11: podcast-asr heeft Lovable-voorrang voor audio-in", () => 
 });
 
 test(
-  "spraak onder beleid: podcast begint bij Lovable (Gemini via de gateway)",
+  "spraak onder beleid: podcast begint bij Gemini rechtstreeks (gratis niveau)",
   async (urls, zet) => {
     stelAiBeleidIn({ project: "podcast", momentopname: podcastBeleid() });
     zet(chatOk("welkom terug"));
@@ -263,22 +273,21 @@ test(
       formaat: "mp3",
       sleutels: alle,
     });
-    assertEquals(r.provider, "lovable");
+    assertEquals(r.provider, "gemini");
     assertEquals(r.type, "audio-in");
     assertEquals(r.gegevens, "publiek");
     assertEquals(r.terugval, false);
-    assert(urls[0].includes("ai.gateway.lovable.dev"));
+    assert(urls[0].includes("generativelanguage"));
   },
 );
 
 test(
-  "spraak onder beleid: podcast valt terug op Gemini als Lovable faalt",
+  "spraak onder beleid: podcast gaat naar Lovable als het gratis quotum op is (429)",
   async (urls, zet) => {
     stelAiBeleidIn({ project: "podcast", momentopname: podcastBeleid() });
-    // Lovable heeft twee audiomodellen: beide 500, dan Gemini rechtstreeks.
+    // Een 429 op de gratis route: alle Gemini-modellen delen het quotum, dus meteen Lovable.
     zet(
-      { status: 500, body: { error: "stuk" } },
-      { status: 500, body: { error: "stuk" } },
+      { status: 429, body: { error: "quota" } },
       chatOk("welkom terug"),
     );
     const r = await transcribeerAudio({
@@ -287,10 +296,10 @@ test(
       formaat: "mp3",
       sleutels: alle,
     });
-    assertEquals(r.provider, "gemini");
+    assertEquals(r.provider, "lovable");
     assertEquals(r.terugval, true);
-    assert(urls[0].includes("lovable"));
-    assert(urls[urls.length - 1].includes("generativelanguage"));
+    assert(urls[0].includes("generativelanguage"));
+    assert(urls[urls.length - 1].includes("lovable"));
   },
 );
 

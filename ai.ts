@@ -1920,9 +1920,9 @@ async function callAiKern(
  * Providers die spraak aankunnen, in volgorde van voorkeur, ZONDER beleid.
  *
  * Onder beleid (project gezet) beslist `beleid/ai-beleid.json` de volgorde
- * (`basis["audio-in"]` plus `voorrang`), niet deze lijst. Sinds beleid v11
- * (8 nov 2026) staat Lovable eerst voor project `podcast` (ASR op de VPS) en
- * blijft Gemini rechtstreeks erachter. De lokale Whisper staat als niet-
+ * (`basis["audio-in"]` plus `voorrang`), niet deze lijst. Sinds beleid v12
+ * (8 nov 2026) staat voor project `podcast` (ASR op de VPS) het gratis niveau
+ * van Gemini eerst en gaat het bij quotum of 429 verder via Lovable. De lokale Whisper staat als niet-
  * aanroepbare provider in het beleid: de laatste terugval, buiten deze keten.
  *
  * `gemini` staat vóór `lovable` omdat Google's eigen API spraak GRATIS doet
