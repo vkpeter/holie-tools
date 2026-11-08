@@ -153,6 +153,19 @@ async function publiceerBestand(bron: string | URL, sleutel: string) {
   });
   console.log(r.status, await r.text());
   if (!r.ok) Deno.exit(1);
+  // Tickbook laten weten (anders mist het elke versie die niet de laatste live is). Mislukt dit,
+  // dan is het beleid wel gepubliceerd: enkel melden.
+  try {
+    const b = await fetch(TICKBOOK_AI_BELEID, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ actie: "laptop_bevestig", envelop }),
+    });
+    const j = await b.json().catch(() => ({}));
+    console.log(`Tickbook: HTTP ${b.status}, ok=${j?.ok ?? false}, status=${j?.status ?? "?"}`);
+  } catch (e) {
+    console.log(`Tickbook niet bereikt: ${(e as Error).message}`);
+  }
 }
 
 if (import.meta.main) {
