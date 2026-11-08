@@ -219,6 +219,10 @@ export const AI_BELEID: AiBeleid = {
       "omschrijving":
         "podcast-merge op de VPS: duidingen samenvoegen in de privé-vault (HolieVault), enkel Claude Opus",
     },
+    "holie-ci": {
+      "gegevens": "publiek",
+      "omschrijving": "Korte triage van gefaalde smokes en CI-runs op de VPS",
+    },
   },
   "providers": {
     "meta": {
@@ -341,7 +345,7 @@ export const AI_BELEID: AiBeleid = {
     },
   },
   "uitgegeven": "2026-11-08",
-  "volgnummer": 13,
+  "volgnummer": 14,
   "toelatingen": [
     {
       "wie": "Peter",
