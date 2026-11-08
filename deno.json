@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.30.1",
+  "version": "0.31.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -18,7 +18,8 @@
     "./ai-beleid": "./ai-beleid.ts",
     "./nieuwsbrief": "./nieuwsbrief.ts",
     "./login": "./login.ts",
-    "./google-terug": "./google-terug.ts"
+    "./google-terug": "./google-terug.ts",
+    "./velden": "./velden.ts"
   },
   "publish": {
     "include": [
@@ -34,11 +35,13 @@
       "mail.ts",
       "ics.ts",
       "formulier.ts",
+      "velden.ts",
       "codes.ts",
       "nieuwsbrief.ts",
       "sql/rate_limit_hit.sql",
       "sql/telegram_onaf.sql",
       "sql/nieuwsbrief.sql",
+      "sql/velden.sql",
       "login.ts",
       "google-terug.ts",
       "README.md",

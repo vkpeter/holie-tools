@@ -59,13 +59,9 @@ Deno.test("normaliseerEmail: ongeldige vormen", () => {
       "a@[1.2.3.4]",
       "a\u0000@b.de",
       "a\u007f@b.de",
-      // Uit de review van 0.18.0: onzichtbare tekens en URL-tekens.
-      "a\u200b@gmail.com",
-      "a\u00ad@x.com",
-      "a@x\u200b.com",
-      "a\u202e@x.com",
+      // Uit de review van 0.18.0: stuurtekens (Cc) en URL-tekens. Onzichtbare
+      // Cf-tekens worden sinds 0.31.0 gestript, zie de test hieronder.
       "a\u0085@x.com",
-      "a\ufeff@x.com",
       "a@b.c/d?e",
       "a@b.c#d",
       "a@b_c.de",
@@ -78,6 +74,26 @@ Deno.test("normaliseerEmail: ongeldige vormen", () => {
     assertEquals(normaliseerEmail(x), null, JSON.stringify(x));
     assertEquals(isGeldigEmail(x), false);
   }
+});
+
+Deno.test("normaliseerEmail: onzichtbare tekens en NBSP worden gestript (sinds 0.31.0)", () => {
+  // Voor 0.31.0 waren dit allemaal null.
+  assertEquals(normaliseerEmail("a\u200b@gmail.com"), "a@gmail.com");
+  assertEquals(normaliseerEmail("a\u00ad@x.com"), "a@x.com");
+  assertEquals(normaliseerEmail("a@x\u200b.com"), "a@x.com");
+  assertEquals(normaliseerEmail("a\u202e@x.com"), "a@x.com");
+  assertEquals(normaliseerEmail("a\ufeff@x.com"), "a@x.com");
+  // iPhone-plakactie: bidi-tekens en NBSP rond het adres.
+  assertEquals(
+    normaliseerEmail("\u202AJan@Example.BE\u202C\u00A0"),
+    "jan@example.be",
+  );
+  assertEquals(normaliseerEmail("\u200E\u202Fa@b.be\u200F"), "a@b.be");
+  assertEquals(isGeldigEmail("a\u200b@gmail.com"), true);
+  // Een spatie of NBSP midden in het adres blijft ongeldig.
+  assertEquals(normaliseerEmail("a\u00A0b@c.de"), null);
+  // Enkel onzichtbare tekens is leeg.
+  assertEquals(normaliseerEmail("\u200B\u200E"), null);
 });
 
 Deno.test("normaliseerEmail: lengte eerst, grens 254", () => {

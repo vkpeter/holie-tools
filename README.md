@@ -4,8 +4,118 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.31.0 ook `./velden`:
+[één methode per invoerveld](#velden-één-methode-per-invoerveld-0310).
+
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## velden: één methode per invoerveld (0.31.0)
+
+> **Regel: elk invoerveld voor e-mail, telefoon, land, postcode, btw, IBAN en
+> URL gaat door `@holie/tools/velden`, in het scherm én op de server (de
+> SQL-versie staat in `sql/velden.sql`).** Geen eigen `trim()` of regex per
+> project.
+
+Waarom: iOS zet onzichtbare opmaaktekens (Unicode `Cf`: U+200B-U+200F,
+U+202A-U+202E, U+2060-U+2064, U+FEFF) en niet-brekende spaties (U+00A0, U+202F)
+in een geplakt veld. `trim()` en Postgres `btrim()` halen die niet weg. Op 8 nov
+2026 plakte een iPhone-gebruiker in Roundbook `"0465 50 40 85"` en de server
+weigerde het nummer of bewaarde rommel.
+
+Afspraak voor alle functies: `normaliseerX(invoer: unknown, ...)` geeft een
+`string` of `null` (leeg of ongeldig), `isGeldigX` geeft een boolean,
+`weergaveX` maakt de leesbare vorm. **Bewaar altijd de genormaliseerde vorm**,
+toon de weergavevorm.
+
+| functie                                                            | geeft                                                                                         | voorbeeld                                            |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `schoonRegel(s)`                                                   | één regel: Cf weg, elke spatie een spatie, samengevoegd, getrimd                              | `"\u200E Jan\u00A0 P"` wordt `"Jan P"`               |
+| `schoonTekst(s)`                                                   | meerdere regels: Cf weg, NBSP een spatie, `\r\n` wordt `\n`, rand getrimd                     | `"Dag\r\n\r\nGroet "` wordt `"Dag\n\nGroet"`         |
+| `CF_TEKENS`, `UNICODE_SPATIES`                                     | de regexes (zonder `g`-vlag)                                                                  |                                                      |
+| `normaliseerEmail`, `isGeldigEmail`, `EMAIL_PATROON`               | adres in kleine letters, max 254 (ook te importeren uit `./formulier`)                        | `" Jan@Example.BE"` wordt `"jan@example.be"`         |
+| `normaliseerTelefoon(x, standaardLand = "BE")`, `isGeldigTelefoon` | E.164 of `null`                                                                               | `"0475/12.34.56"` wordt `"+32475123456"`             |
+| `weergaveTelefoon(e164)`                                           | BE gsm/vast gegroepeerd, rest `+CC rest`                                                      | `"+32 475 12 34 56"`                                 |
+| `TELEFOON_LANDEN`                                                  | landentabel voor nationale nummers (BE NL LU FR DE GB CH AT ES IT MA TR)                      |                                                      |
+| `normaliseerLand`, `isGeldigLand`                                  | ISO alpha-2 uit code (alpha-2/3) of naam in nl/en/fr/de                                       | `"Pays-Bas"` wordt `"NL"`                            |
+| `normaliseerPostcode(x, land)`, `isGeldigPostcode`                 | BE 4 cijfers, NL `1234 AB`, LU 4, DE 5, FR 5, rest hoofdletters max 12                        | `"1234ab"` met NL wordt `"1234 AB"`                  |
+| `normaliseerOndernemingsnummer`, `isGeldigOndernemingsnummer`      | 10 cijfers, mod-97 gecontroleerd                                                              | `"BE 0403.019.261"` wordt `"0403019261"`             |
+| `weergaveOndernemingsnummer`                                       | `0403.019.261`                                                                                |                                                      |
+| `normaliseerBtw(x, land?)`, `isGeldigBtw`                          | `BE0403019261`, `NL123456789B01`, `LU12345678`, `FR` + 2 tekens + 9 cijfers, `DE` + 9 cijfers | `"0403.019.261"` met BE wordt `"BE0403019261"`       |
+| `normaliseerIban`, `isGeldigIban`, `IBAN_LENGTES`                  | hoofdletters zonder spaties, landlengte en mod-97 gecontroleerd                               | `"be68 5390 0754 7034"` wordt `"BE68539007547034"`   |
+| `weergaveIban`                                                     | groepen van vier                                                                              | `"BE68 5390 0754 7034"`                              |
+| `normaliseerUrl`, `isGeldigUrl`                                    | `href`; alleen http(s), punt in de host, `https://` erbij                                     | `"www.Example.be"` wordt `"https://www.example.be/"` |
+| `VELDEN_SQL`                                                       | de tekst van `sql/velden.sql`                                                                 |                                                      |
+
+Beslissingen die je moet kennen:
+
+- **Telefoon:** een nationaal nummer krijgt het landnummer van `standaardLand`.
+  `32475123456` (landnummer zonder plus) is `null`: we raden niet. Voor BE zijn
+  8 of 9 cijfers na `+32` goed, voor NL 9 na `+31`; de rest volgt
+  `^\+[1-9]\d{7,14}$`.
+- **Btw:** zonder landcode in de invoer en zonder `land` is het `null`. Staat er
+  een landcode in de invoer, dan wint die. Enkel BE heeft een controlegetal.
+- **IBAN:** enkel landen in `IBAN_LENGTES`; een ander land is `null`.
+- **URL:** geen `localhost`, geen `javascript:`/`mailto:`, geen `user:pw@host`.
+- `schoonTekst` strip ook de zero-width joiner (U+200D, categorie `Cf`):
+  samengestelde emoji vallen uiteen.
+
+### Gebruik
+
+```ts
+// Deno / Supabase edge functions
+import {
+  normaliseerEmail,
+  normaliseerTelefoon,
+  weergaveTelefoon,
+} from "jsr:@holie/tools@^0.31/velden";
+
+normaliseerTelefoon("\u202A0465 50 40 85\u202C"); // "+32465504085"
+weergaveTelefoon("+32465504085"); // "+32 465 50 40 85"
+```
+
+```jsonc
+// package.json (Vite, TanStack Start): de JSR-spiegel op npm
+{ "dependencies": { "@holie/tools": "npm:@jsr/holie__tools@^0.31.0" } }
+// plus in .npmrc:  @jsr:registry=https://npm.jsr.io
+```
+
+```ts
+import { normaliseerPostcode } from "@holie/tools/velden";
+```
+
+### Postgres
+
+Kopieer `sql/velden.sql` (of `VELDEN_SQL`) in een migratie. Het levert
+`strip_cf`, `norm_regel`, `norm_email`, `email_geldig`, `norm_telefoon` en
+`norm_postcode`, allemaal `immutable parallel safe` met `search_path = ''`, dus
+bruikbaar in triggers, check-constraints en generated columns:
+
+```sql
+alter table klanten
+  add column telefoon_norm text generated always as (public.norm_telefoon(telefoon)) stored,
+  add constraint klanten_email_geldig check (email is null or public.email_geldig(email));
+```
+
+Verschillen met de TS-versie: telefoon en postcode nemen enkel een ISO
+alpha-2-code als land (normaliseer een landnaam eerst met `normaliseerLand`),
+`norm_email` geeft de opgeschoonde tekst en `email_geldig` het oordeel, en een
+adres van ~254 tekens vol met `İ` (U+0130) krijgt een ander oordeel omdat
+`lower()` in Postgres er één teken van maakt. De SQL is getoetst in PGlite met
+dezelfde gevallen als de TS-tests (149 vergelijkingen, 0 verschillen, plus de
+`Cf`-lijst en de spaties over alle codepoints tot U+30000). De landentabel voor
+telefoon moet je op twee plaatsen bijhouden (`TELEFOON_LANDEN` en
+`norm_telefoon`).
+
+### ⚠️ Gedragswijziging in 0.31.0 (`normaliseerEmail`, `isGeldigEmail`)
+
+`./formulier` houdt dezelfde namen, maar de implementatie woont nu in
+`./velden`. Onzichtbare opmaaktekens (`Cf`) worden **gestript in plaats van
+geweigerd**: `"a\u200B@gmail.com"` was `null` en is nu `"a@gmail.com"`. Spaties
+(ook NBSP) aan begin en einde worden afgesneden. Spaties en regeleinden _midden
+in_ het adres blijven `null`, net als stuurtekens (`Cc`). Een limiet per adres
+wordt er niet zwakker van: `a\u200B@x.com` en `a@x.com` zijn nu hetzelfde adres.
+Nieuw: `./velden` en `sql/velden.sql`.
 
 ## ai
 

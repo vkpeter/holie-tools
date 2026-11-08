@@ -20,55 +20,15 @@ export type { RpcClient } from "./auth.ts";
 
 // ───────────── E-mail (N5) ─────────────
 
-/** Langste adres dat SMTP toelaat (RFC 5321: 256 voor het pad, min de haken). */
-export const EMAIL_MAX_LENGTE = 254;
-
-/**
- * Lineair e-mailpatroon. Elk deel (tussen punten, voor en na de `@`) sluit de
- * punt en de `@` uit, dus er is maar één manier om te matchen: geen
- * backtracking op `a@.......` (gemeten met 20.000 punten in
- * `formulier_test.ts`).
- *
- * Basis is het patroon `/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/` van holie, strenger
- * gemaakt na de review van 0.18.0:
- * - Zoals bij Eendje (newsletter-subscribe, 28 okt 2026) vallen de tekens weg
- *   die een mailheader of HTML kunnen breken (`<>"(),;:\[]`). Die mogen volgens
- *   RFC 5322 niet zonder aanhalingstekens in een adres staan.
- * - Ook stuurtekens en onzichtbare opmaaktekens (`\p{Cc}`, `\p{Cf}`: zero-width
- *   space, zachte koppelstreep, richtingswissel). Met een zero-width space
- *   omzeilt iemand anders de limiet per adres en de ontdubbeling.
- * - Geen punt vooraan, achteraan of dubbel in het lokale deel.
- * - Het domein enkel `A-Z a-z 0-9 -` per label: een domein met accenten komt
- *   als punycode (`xn--...`), zoals een browser het in `type=email` doorgeeft.
- *
- * De apostrof en letters met accenten in het lokale deel blijven toegelaten
- * (`o'neil@...`, `josé@...`).
- */
-export const EMAIL_PATROON =
-  /^[^\s@.<>"(),;:\\[\]\p{Cc}\p{Cf}]+(?:\.[^\s@.<>"(),;:\\[\]\p{Cc}\p{Cf}]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/u;
-
-/**
- * Het adres zoals het in de databank hoort, of `null` als het geen bruikbaar
- * adres is. Volgorde: eerst de lengte, dan het patroon, dan kleine letters. Zo
- * ziet de regex nooit een lange invoer.
- *
- * Neemt `unknown` aan, zodat een JSON-body rechtstreeks door kan: een getal of
- * object geeft `null`.
- */
-export function normaliseerEmail(invoer: unknown): string | null {
-  if (typeof invoer !== "string") return null;
-  if (invoer.length > EMAIL_MAX_LENGTE) return null;
-  const adres = invoer.trim();
-  if (!EMAIL_PATROON.test(adres)) return null;
-  const klein = adres.toLowerCase();
-  // Kleine letters kunnen langer zijn (`İ` wordt twee tekens): opnieuw meten.
-  return klein.length > EMAIL_MAX_LENGTE ? null : klein;
-}
-
-/** Is dit een bruikbaar adres? Zelfde regels als `normaliseerEmail`. */
-export function isGeldigEmail(invoer: unknown): boolean {
-  return normaliseerEmail(invoer) !== null;
-}
+// Sinds 0.31.0 woont de e-mailcontrole in `./velden` (één vaste methode per
+// veldsoort); deze namen blijven hier bestaan. Onzichtbare opmaaktekens (`Cf`)
+// en spaties aan de rand worden nu gestript in plaats van geweigerd.
+export {
+  EMAIL_MAX_LENGTE,
+  EMAIL_PATROON,
+  isGeldigEmail,
+  normaliseerEmail,
+} from "./velden.ts";
 
 // ───────────── Klant-IP (N3) ─────────────
 
