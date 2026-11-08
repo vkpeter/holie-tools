@@ -345,7 +345,7 @@ export const AI_BELEID: AiBeleid = {
     },
   },
   "uitgegeven": "2026-11-08",
-  "volgnummer": 14,
+  "volgnummer": 15,
   "toelatingen": [
     {
       "wie": "Peter",
