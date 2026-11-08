@@ -108,6 +108,20 @@ export const AI_BELEID: AiBeleid = {
       "bron":
         "Peter, 8 nov 2026: 'nu we weten dat het werkt, mag je idd eerst de gratis gemini tokens op farmen en daarna verder doen op lovable ai tokens'",
     },
+    {
+      "provider": "anthropic",
+      "project": "podcast-merge",
+      "types": [
+        "tekst",
+      ],
+      "van": "2026-11-08",
+      "wie": "Peter",
+      "datum": "2026-11-08",
+      "reden":
+        "Merge van de podcast-duidingen naar de vault op de VPS: Claude Opus, geen terugval (de job stopt liever dan met een goedkoper model te schrijven).",
+      "bron":
+        "Peter, 8 nov 2026: 'hij mag specifiek voor het merge deel opus gebruiken, omdat het belangrijk is dat die inzichten zeer goed zijn'",
+    },
   ],
   "contexten": {
     "roundbook": {
@@ -199,6 +213,11 @@ export const AI_BELEID: AiBeleid = {
       "gegevens": "persoon",
       "omschrijving":
         "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+    },
+    "podcast-merge": {
+      "gegevens": "prive-peter",
+      "omschrijving":
+        "podcast-merge op de VPS: duidingen samenvoegen in de privé-vault (HolieVault), enkel Claude Opus",
     },
   },
   "providers": {
@@ -322,7 +341,7 @@ export const AI_BELEID: AiBeleid = {
     },
   },
   "uitgegeven": "2026-11-08",
-  "volgnummer": 12,
+  "volgnummer": 13,
   "toelatingen": [
     {
       "wie": "Peter",
