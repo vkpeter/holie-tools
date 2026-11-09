@@ -59,9 +59,9 @@ export type { BeleidEnvelop } from "./beleid.ts";
 export const PAKKET_VERSIE = "0.33.0";
 
 /**
- * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
- * beeldgeneratie, geen chat-completions: zet hem niet in de volgorde van
- * `callAi` of `transcribeerAudio`.
+ * `meta` doet beeld-uit (`genereerBeeld`, endpoint `ENDPOINT.meta`) en sinds 0.33.0 ook gewone
+ * tekst in `callAi` (OpenAI-vorm op `META_CHAT_ENDPOINT`, Muse). Tools en beeld-in zijn voor
+ * meta NIET nagemeten en zijn uitgesloten; ook `transcribeerAudio` kan hij niet.
  */
 export type AiProvider =
   | "gemini"
@@ -91,6 +91,13 @@ export const STANDAARD_MODELLEN = {
   gemini: "gemini-3.5-flash-lite",
   lovable: "google/gemini-3-flash-preview",
   deepseek: "deepseek-v4-flash",
+  /**
+   * Meta Muse op `META_CHAT_ENDPOINT` (OpenAI-vorm, Bearer META_MODEL_API_KEY), laatste schakel
+   * van de tekstketen (Peter, 9-11-2026). Modellen nagemeten op de VPS (GET /v1/models):
+   * muse-spark-1.3, muse-spark-1.2, muse-ember-1.0, muse-wonder-1.0. Prijs, function calling
+   * en beeld-in zijn NIET nagemeten.
+   */
+  meta: "muse-spark-1.3",
   deepseekBeeld: "deepseek-v4-flash-vision-exp",
   /**
    * Claude Haiku 5.5 op Anthropic's eigen Messages API, sinds 0.15.0 de
@@ -422,9 +429,12 @@ const ENDPOINT: Record<AiProvider, string> = {
   deepseek: "https://api.deepseek.com/chat/completions",
   /** Messages API, GEEN chat-completions: zie `bouwAnthropicBody`. */
   anthropic: "https://api.anthropic.com/v1/messages",
-  /** Beeldgeneratie, GEEN chat-completions. Enkel voor `genereerBeeld`. */
+  /** Beeldgeneratie, GEEN chat-completions. Enkel voor `genereerBeeld`. Tekst: `META_CHAT_ENDPOINT`. */
   meta: "https://api.meta.ai/v1/images/generations",
 };
+
+/** Meta Muse als chatprovider (OpenAI-vorm); nagemeten 9-11-2026 op de VPS (400 bij lege messages). */
+export const META_CHAT_ENDPOINT = "https://api.meta.ai/v1/chat/completions";
 
 const SLEUTEL_VAR: Record<AiProvider, string> = {
   gemini: "GEMINI_API_KEY",
@@ -498,6 +508,8 @@ export interface AiOpties extends BeleidOpties {
   cacheTtl?: "5m" | "1h" | false;
   /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
+  /** Model op Meta Muse (standaard `STANDAARD_MODELLEN.meta`). */
+  metaModel?: string;
   /** Laat DeepSeek wél nadenken. Standaard uit, zie de modulekop. */
   deepseekDenken?: boolean;
   /** De berichten bevatten een beeld. */
@@ -909,7 +921,16 @@ const CHAT_PROVIDERS: readonly AiProvider[] = [
   "deepseek",
   "gemini",
   "lovable",
+  "meta",
 ];
+
+/**
+ * Chatproviders voor tools en beeld-in: zonder meta. Function calling en beeld-in van Muse zijn
+ * nog NIET nagemeten; pas aanpassen na een meting.
+ */
+const CHAT_ZONDER_META: readonly AiProvider[] = CHAT_PROVIDERS.filter((p) =>
+  p !== "meta"
+);
 
 /** De providers van de standaardketen van `callAi`. */
 export const TEKST_PROVIDERS: AiProvider[] = [
@@ -917,11 +938,12 @@ export const TEKST_PROVIDERS: AiProvider[] = [
   "gemini",
   "lovable",
   "deepseek",
+  "meta",
 ];
 
 /**
- * Is er minstens één sleutel voor een van `providers` (standaard de tekstketen, zonder
- * `meta`)? Zonder `sleutels` leest ze de omgeving via `aiSleutels()`.
+ * Is er minstens één sleutel voor een van `providers` (standaard de tekstketen, sinds 0.33.0
+ * mét `meta`)? Zonder `sleutels` leest ze de omgeving via `aiSleutels()`.
  */
 export function heeftAiSleutel(
   sleutels: Partial<Record<AiProvider, string>> = aiSleutels(),
@@ -1217,8 +1239,8 @@ export async function kiesAiVolgorde(
 ): Promise<{ volgorde: string[]; uitslag?: KeuzeUitslag }> {
   const standaardPakket: Record<string, readonly AiProvider[]> = {
     tekst: CHAT_PROVIDERS,
-    tools: CHAT_PROVIDERS,
-    "beeld-in": CHAT_PROVIDERS,
+    tools: CHAT_ZONDER_META,
+    "beeld-in": CHAT_ZONDER_META,
     "audio-in": AUDIO_PROVIDERS,
     "beeld-uit": BEELD_PROVIDERS,
   };
@@ -1743,9 +1765,12 @@ async function callAiKern(
     type,
     { ...opties, volgorde: opties.volgorde },
     volgorde,
-    CHAT_PROVIDERS,
+    type === "tekst" ? CHAT_PROVIDERS : CHAT_ZONDER_META,
   );
-  const beschikbaar = keuze.volgorde;
+  // Zonder project filtert kiesVoorAanroep niet op pakket: meta valt hier weg bij tools en beeld.
+  const beschikbaar = type === "tekst"
+    ? keuze.volgorde
+    : keuze.volgorde.filter((p) => p !== "meta");
   const beleidVelden = keuze.uitslag
     ? { type, gegevens: keuze.uitslag.gegevens }
     : {};
@@ -1771,6 +1796,8 @@ async function callAiKern(
       ? opties.anthropicModel ?? STANDAARD_MODELLEN.anthropic
       : naam === "lovable"
       ? opties.lovableModel ?? STANDAARD_MODELLEN.lovable
+      : naam === "meta"
+      ? opties.metaModel ?? STANDAARD_MODELLEN.meta
       : opties.deepseekModel ??
         (opties.beeld
           ? STANDAARD_MODELLEN.deepseekBeeld
@@ -1817,21 +1844,24 @@ async function callAiKern(
       const basis = { label, provider, model, ...beleidVelden, terugval };
       let herkansing = false;
       try {
-        const resp = await fetch(ENDPOINT[naam], {
-          method: "POST",
-          headers: naam === "anthropic"
-            ? {
-              "x-api-key": sleutel,
-              "anthropic-version": "2023-06-01",
-              "Content-Type": "application/json",
-            }
-            : {
-              Authorization: `Bearer ${sleutel}`,
-              "Content-Type": "application/json",
-            },
-          body: JSON.stringify(body),
-          signal: combineerSignalen(opties.timeoutMs, opties.signal),
-        });
+        const resp = await fetch(
+          naam === "meta" ? META_CHAT_ENDPOINT : ENDPOINT[naam],
+          {
+            method: "POST",
+            headers: naam === "anthropic"
+              ? {
+                "x-api-key": sleutel,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+              }
+              : {
+                Authorization: `Bearer ${sleutel}`,
+                "Content-Type": "application/json",
+              },
+            body: JSON.stringify(body),
+            signal: combineerSignalen(opties.timeoutMs, opties.signal),
+          },
+        );
 
         if (!resp.ok) {
           const detail = (await resp.text().catch(() => "")).slice(0, 200);
@@ -2904,6 +2934,8 @@ export function leesJson<T = unknown>(
  * DeepSeek-tarieven zijn de cache-miss-prijs van $0,27 in / $1,10 uit per M.
  */
 export const TARIEVEN: Record<string, { input: number; output: number }> = {
+  // Meta Muse (muse-spark-1.3, -1.2, muse-ember-1.0, muse-wonder-1.0): prijs niet afgelezen, dus
+  // bewust geen regel: `schatUsd` geeft 0 en meldt "geschat". Vul pas aan met een afgelezen bedrag.
   // Beeldmodellen. `output` is hier beelduitvoer, geen tekst: 20x de
   // tekst-output van gemini-3-flash-preview en 120x de tekst-input.
   "google/gemini-2.5-flash-image": { input: 0, output: 0.00003 },

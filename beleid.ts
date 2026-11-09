@@ -601,7 +601,7 @@ export const NOODBELEID: AiBeleid = (() => {
       naam: "Lovable AI-gateway",
       capaciteiten: ["tekst", "tools", "beeld-in", "audio-in", "beeld-uit"],
     },
-    meta: { naam: "Meta (Muse Image)", capaciteiten: ["beeld-uit"] },
+    meta: { naam: "Meta (Muse)", capaciteiten: ["tekst", "beeld-uit"] },
   };
   const toelatingen: Toelating[] = [];
   for (const p of Object.keys(providers)) {
@@ -623,7 +623,7 @@ export const NOODBELEID: AiBeleid = (() => {
     uitgegeven: "2026-11-01T00:00:00Z",
     providers,
     basis: {
-      tekst: ["anthropic", "deepseek", "gemini", "lovable"],
+      tekst: ["anthropic", "gemini", "lovable", "deepseek", "meta"],
       tools: ["anthropic", "deepseek", "gemini", "lovable"],
       "beeld-in": ["anthropic", "deepseek", "gemini", "lovable"],
       "audio-in": ["gemini", "lovable"],

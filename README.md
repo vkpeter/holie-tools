@@ -405,6 +405,15 @@ bij `isTegoedFout`, anders `fout`. De Worker telt ze op in D1-tabel `storing`
 ze op `GET /storing?dag=YYYY-MM-DD` (zelfde leessleutel als `GET /verbruik`):
 `{ dag, storingen: [{ dag, provider, soort, project, aantal, status, eerste, laatste }] }`.
 
+## Nieuw in 0.33.0 (ai): Meta Muse als laatste tekstschakel
+
+`callAi` kent `meta` als chatprovider voor type `tekst` (`META_CHAT_ENDPOINT`,
+OpenAI-vorm, `META_MODEL_API_KEY`, standaardmodel `muse-spark-1.3`, optie
+`metaModel`). `TEKST_PROVIDERS` is nu anthropic, gemini, lovable, deepseek,
+meta. Voor `tools` en `beeld-in` blijft meta uitgesloten: function calling en
+beeld-in zijn niet nagemeten. Er staat geen tarief voor Muse (prijs niet
+afgelezen): `schatUsd` geeft 0.
+
 ## Nieuw in 0.27.1 (ai): `aiVerbruikVersturen` wacht op lopende verzendingen
 
 In een Cloudflare Worker vertrekt de verbruiksmelding meteen, dus de wachtrij

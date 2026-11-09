@@ -73,11 +73,17 @@ Deno.test("aiSleutels leest Deno.env in Deno", () => {
 
 Deno.test("heeftAiSleutel kijkt enkel naar de tekstketen", () => {
   assertEquals(heeftAiSleutel({}), false);
-  // Alleen een beeldsleutel volstaat niet voor tekst, zoals in de oude shim.
-  assertEquals(heeftAiSleutel({ meta: "m" }), false);
+  // Sinds 0.33.0 doet Meta Muse ook tekst (laatste schakel): een metasleutel volstaat.
+  assertEquals(heeftAiSleutel({ meta: "m" }), true);
   assertEquals(heeftAiSleutel({ anthropic: "a" }), true);
   assertEquals(heeftAiSleutel({ meta: "m" }, ["meta"]), true);
-  assertEquals(TEKST_PROVIDERS, ["anthropic", "gemini", "lovable", "deepseek"]);
+  assertEquals(TEKST_PROVIDERS, [
+    "anthropic",
+    "gemini",
+    "lovable",
+    "deepseek",
+    "meta",
+  ]);
 });
 
 Deno.test("heeftAiSleutel leest zonder argument de omgeving", async () => {

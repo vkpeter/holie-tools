@@ -492,3 +492,95 @@ test(
     assertEquals("storingen" in r, false);
   },
 );
+
+// ---- Meta Muse als laatste tekstschakel ----
+
+const META_CHAT = "https://api.meta.ai/v1/chat/completions";
+const metaOk = () =>
+  new Response(
+    JSON.stringify({
+      choices: [{ message: { content: "van muse" }, finish_reason: "stop" }],
+    }),
+    { status: 200 },
+  );
+
+test(
+  "tekst: anthropic 400 credit, deepseek 529 -> meta op het chat-endpoint met muse-spark-1.3",
+  async (oproepen, zet) => {
+    stelAiBeleidIn({
+      project: "ese",
+      momentopname: AI_BELEID,
+      verbruik: NEP,
+    });
+    zet((url) => {
+      if (url === NEP) return verbruikOk();
+      if (url === CLAUDE_URL) return tegoedOp();
+      if (url === META_CHAT) return metaOk();
+      return new Response("{}", { status: 529 });
+    });
+    const a = await callAi(vraag, {
+      label: "t",
+      sleutels: alle,
+      volgorde: ["anthropic", "deepseek", "meta"],
+      pogingen: 1,
+      gegevens: "publiek",
+    });
+    assertEquals(a.provider, "meta");
+    assertEquals(a.model, "muse-spark-1.3");
+    assertEquals(a.terugval, true);
+    const metaCall = oproepen.find((o) => o.url === META_CHAT)!;
+    assertEquals(JSON.parse(metaCall.body!).model, "muse-spark-1.3");
+    assert(!oproepen.some((o) => o.url.includes("images/generations")));
+  },
+);
+
+test("type tools slaat meta over", async (oproepen, zet) => {
+  stelAiBeleidIn({ project: "ese", momentopname: AI_BELEID, verbruik: NEP });
+  zet((url) => {
+    if (url === NEP) return verbruikOk();
+    if (url === META_CHAT) return metaOk();
+    return new Response("{}", { status: 529 });
+  });
+  let gegooid = false;
+  try {
+    await callAi(vraag, {
+      label: "t",
+      sleutels: alle,
+      volgorde: ["deepseek", "meta"],
+      pogingen: 1,
+      gegevens: "publiek",
+      tools: [{
+        type: "function",
+        function: { name: "f", parameters: { type: "object" } },
+      }],
+    });
+  } catch {
+    gegooid = true;
+  }
+  assert(gegooid);
+  assert(!oproepen.some((o) => o.url === META_CHAT));
+});
+
+test(
+  "zonder project: meta staat achteraan de standaardketen, niet bij tools",
+  async (oproepen, zet) => {
+    zet((url) =>
+      url === META_CHAT ? metaOk() : new Response("{}", { status: 529 })
+    );
+    const a = await callAi(vraag, { label: "t", sleutels: alle, pogingen: 1 });
+    assertEquals(a.provider, "meta");
+    const volgorde = oproepen.map((o) => o.url);
+    assertEquals(volgorde[volgorde.length - 1], META_CHAT);
+    oproepen.length = 0;
+    await callAi(vraag, {
+      label: "t",
+      sleutels: alle,
+      pogingen: 1,
+      tools: [{
+        type: "function",
+        function: { name: "f", parameters: { type: "object" } },
+      }],
+    }).catch(() => {});
+    assert(!oproepen.some((o) => o.url === META_CHAT));
+  },
+);

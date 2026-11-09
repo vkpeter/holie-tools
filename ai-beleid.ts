@@ -19,6 +19,7 @@ export const AI_BELEID: AiBeleid = {
       "gemini",
       "lovable",
       "deepseek",
+      "meta",
     ],
     "tools": [
       "anthropic",
@@ -226,9 +227,10 @@ export const AI_BELEID: AiBeleid = {
   },
   "providers": {
     "meta": {
-      "naam": "Meta Model API (Muse Image)",
+      "naam": "Meta Model API (Muse)",
       "aanroepbaar": true,
       "capaciteiten": [
+        "tekst",
         "beeld-uit",
       ],
     },
