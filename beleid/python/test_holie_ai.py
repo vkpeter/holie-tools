@@ -177,5 +177,15 @@ def test_standaardvolgorde_uit_beleid_met_lovable_en_onbekende_provider():
 
 
 if __name__ == "__main__":
-    import pytest
-    sys.exit(pytest.main([__file__, "-q"]))
+    # Zonder pytest (staat niet op de VPS of de laptop): elke test_-functie draaien.
+    fouten = 0
+    for naam, f in sorted(globals().items()):
+        if naam.startswith("test_") and callable(f):
+            holie_ai.wis_tegoed_cache() if hasattr(holie_ai, "wis_tegoed_cache") else None
+            try:
+                f()
+                print("ok", naam)
+            except Exception as e:  # noqa: BLE001
+                fouten += 1
+                print("FOUT", naam, type(e).__name__, e)
+    sys.exit(1 if fouten else 0)
