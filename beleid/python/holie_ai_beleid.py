@@ -1,8 +1,11 @@
 """Het centrale AI-beleid voor Python-code (Domus, vacatures, scripts op de VPS of de Pi).
 
 Python-tegenhanger van `beleid.ts` + het ophalen in `ai.ts` van @holie/tools (sinds 0.23.0).
-Eén bestand, enkel de standaardbibliotheek: kopieer het naast je code (de bron staat in
-holie-tools/beleid/python/; een toets daar vergelijkt de uitkomst met de TypeScript-versie).
+Enkel de standaardbibliotheek. Niet kopieren: de bron staat in holie-tools/beleid/python/ en zit
+in de JSR-publicatie van @holie/tools. Op de VPS staat het in /opt/holie/lib/python (dagelijks
+bijgewerkt uit die publicatie; containers mounten het read-only en zetten PYTHONPATH); lokaal
+zet je PYTHONPATH naar holie-tools/beleid/python. Een toets daar vergelijkt de uitkomst met de
+TypeScript-versie. De client die er bovenop zit (terugval, verbruik) is `holie_ai.call_ai`.
 
     from holie_ai_beleid import kies_providers, huidig_beleid
 
@@ -35,7 +38,7 @@ from typing import Callable, Iterable
 
 BELEID_URL = "https://beleid.holie.be/ai-beleid.json"
 BELEID_PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="
-PAKKET_VERSIE = "py-1.1.0"
+PAKKET_VERSIE = "py-1.2.0"
 VERS_S = 5 * 60
 MAX_S = 24 * 60 * 60
 
@@ -446,12 +449,28 @@ def _brusselse_dag() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def samenvoegen_storingen(storingen: list[dict] | None) -> list[dict]:
+    """Voegt storingen samen per (provider, soort): aantal erbij, status van de laatste."""
+    uit: dict[tuple[str, str], dict] = {}
+    for s in storingen or []:
+        sleutel = (str(s.get("provider")), str(s.get("soort")))
+        if sleutel not in uit:
+            uit[sleutel] = {"provider": sleutel[0], "soort": sleutel[1],
+                            "status": int(s.get("status") or 0), "aantal": 0}
+        uit[sleutel]["aantal"] += int(s.get("aantal") or 1)
+        uit[sleutel]["status"] = int(s.get("status") or 0)
+    return list(uit.values())
+
+
 def meld_verbruik(project: str, provider: str, type_: str = "tekst", usd: float = 0.0, *,
                   terugval: bool = False, label: bool = True, fout: bool = False,
+                  storingen: list[dict] | None = None,
                   url: str | None = None, timeout: float = 2.0) -> bool:
     """Meldt één aanroep aan de dagteller (POST /verbruik). Gooit nooit; geeft True als de
     Worker het aanvaardde. `label` = de aanroep gaf zelf `gegevens` mee. Uit met
-    HOLIE_AI_VERBRUIK_URL=uit of HOLIE_AI_BELEID_URL=uit (tests)."""
+    HOLIE_AI_VERBRUIK_URL=uit of HOLIE_AI_BELEID_URL=uit (tests). `storingen`: de providers die
+    in deze aanroep faalden, [{"provider","soort","status"}]; samengevoegd per provider+soort
+    met `aantal`, en weggelaten als de lijst leeg is."""
     try:
         adres = url or os.environ.get("HOLIE_AI_VERBRUIK_URL") or VERBRUIK_URL
         if adres == "uit" or (not url and os.environ.get("HOLIE_AI_BELEID_URL") == "uit"):
@@ -465,6 +484,9 @@ def meld_verbruik(project: str, provider: str, type_: str = "tekst", usd: float 
             "aanroepen": 1, "usd": round(bedrag, 6), "terugval": int(bool(terugval)),
             "zonder_label": int(not label), "fouten": int(bool(fout)),
         }
+        samen = samenvoegen_storingen(storingen)
+        if samen:
+            regel["storingen"] = samen
         data = json.dumps({"v": PAKKET_VERSIE, "regels": [regel]}).encode("utf-8")
         verzoek = urllib.request.Request(adres, data=data, method="POST", headers={
             "content-type": "application/json",
