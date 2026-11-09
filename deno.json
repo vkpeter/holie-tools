@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -19,7 +19,8 @@
     "./nieuwsbrief": "./nieuwsbrief.ts",
     "./login": "./login.ts",
     "./google-terug": "./google-terug.ts",
-    "./velden": "./velden.ts"
+    "./velden": "./velden.ts",
+    "./gebruikers": "./gebruikers.ts"
   },
   "publish": {
     "include": [
@@ -44,6 +45,8 @@
       "sql/velden.sql",
       "login.ts",
       "google-terug.ts",
+      "gebruikers.ts",
+      "sql/gebruikers.sql",
       "README.md",
       "LICENSE"
     ]

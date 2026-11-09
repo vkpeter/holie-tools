@@ -4,11 +4,89 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.32.0 ook `./gebruikers`:
+[gedeeld gebruikersbeheer](#gebruikers-gedeeld-gebruikersbeheer-0320).
+
 Sinds 0.31.0 ook `./velden`:
 [één methode per invoerveld](#velden-één-methode-per-invoerveld-0310).
 
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## gebruikers: gedeeld gebruikersbeheer (0.32.0)
+
+> **Regel: een app die gebruikers beheert (lijst, rol, uitnodigen, deactiveren,
+> verwijderen) gebruikt `@holie/tools/gebruikers`, met de rolbewaking ook in de
+> databank (`sql/gebruikers.sql`).** Het rolmodel blijft van de app; het pakket
+> krijgt de rollen als instelling.
+
+Waarom: op 9 nov 2026 kon geen enkele van de vijf apps (Tickbook, Roundbook,
+Eagle-Eye, Eendje, Foodie) alles, vier misten de bescherming tegen jezelf
+degraderen of de laatste beheerder weghalen, en `zoekAccount` (een lus over
+`listUsers`) stond twee keer gekopieerd.
+
+```ts
+const instelling = {
+  toewijsbaar: ["admin", "user", "viewer"], // wat het scherm zet
+  beheerders: ["admin"], // telt voor "niet de laatste beheerder"
+  meerdere: false, // één rol per gebruiker
+};
+```
+
+| onderdeel                                             | wat                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `magRolWijzigen`, `magDeactiveren`, `magVerwijderen`  | regels voor scherm en server: niet jezelf, niet de laatste beheerder, bevestiging met e-mail      |
+| `statusVan(account)`                                  | `uitgenodigd` (nooit aangemeld), `actief`, `gedeactiveerd` (ban)                                  |
+| `normaliseerNaam`, `telBeheerders`                    | naam via `schoonRegel` (max 100, `""` = wissen); beheerders die niet gedeactiveerd zijn           |
+| `zoekAccountOpEmail(admin, email)`                    | één RPC `account_op_email` (service-role), geen `listUsers`-lus                                   |
+| `nodigUit(admin, opties)`                             | `generateLink` + eigen bevestigingslink + mail via `./mail`; idempotent; `droog: true` mailt niet |
+| `wijzigEmail`, `wijzigNaam`, `zetActief`, `verwijder` | admin-API; e-mail meteen bevestigd en nooit dat van een ander account                             |
+| `vereisBeheerder(req, { gebruiker, isBeheerder })`    | poort: 401 / 403 / 500 of `{ userId }`; de rolcheck is een functie van de app                     |
+| `maakGebruikersBeheer(React)`                         | scherm: lijst, zoeken, pagina's, rolkeuze, status, bewerken, uitnodigen, opnieuw sturen, ...      |
+| `GEBRUIKERS_TEKSTEN`                                  | nl, en, fr, de                                                                                    |
+
+De serverfuncties krijgen de admin-client (`createClient(url, serviceKey)`) mee
+en lezen geen omgevingsvariabelen: ze werken in een edge function (Deno) en in
+Node (TanStack Start). Ze gooien niet; een fout komt terug als vaste code
+(`ongeldig_email`, `bezet`, `link`, `mail`, ...).
+
+`nodigUit`: een nieuw adres krijgt een `invite`, een account dat nog nooit
+aanmeldde een `magiclink` (`status: "opnieuw"`), een account in gebruik niets
+(`status: "bestaat"`, tenzij `ookBestaand`). Het account bestaat zodra de link
+gemaakt is; mislukt de mail, dan herstelt "opnieuw sturen" het. Een dubbele klik
+in dezelfde minuut mailt één keer (Resend-idempotentie).
+
+⚠️ `verwijder` volgt de `on delete cascade` naar `auth.users`: ga in de app
+eerst na of het account eigen gegevens heeft, en deactiveer dan liever.
+
+```tsx
+// Scherm: dezelfde vorm als het loginblok. shadcn Select en Dialog zijn
+// samengesteld; de app schrijft er een kleine omslag rond (Keuze, Dialoog).
+import * as React from "react";
+import { maakGebruikersBeheer } from "@jsr/holie__tools/gebruikers";
+const GebruikersBeheer = maakGebruikersBeheer(React);
+
+<GebruikersBeheer
+  gebruikers={rijen}
+  huidigeId={user.id}
+  instelling={instelling}
+  onRol={(g, [rol]) => zetRol(g.id, rol)}
+  onUitnodigen={({ email, naam, rollen }) =>
+    roep("uitnodigen", { email, naam, rol: rollen[0] })}
+  onActief={(g, actief) => roep("actief", { id: g.id, actief })}
+  extraKolom={{ kop: "Toegang", cel: (g) => <Toegang id={g.id} /> }}
+  onderdelen={{
+    Knop: Button,
+    Invoer: Input,
+    Keuze: MijnSelect,
+    Dialoog: MijnDialoog,
+  }}
+/>;
+```
+
+Een handeling die een string teruggeeft (of gooit), toont die als fout; niets
+teruggeven is gelukt. Het scherm toetst de regels al vóór de handeling, maar de
+server en de databank moeten ze zelf afdwingen.
 
 ## velden: één methode per invoerveld (0.31.0)
 
