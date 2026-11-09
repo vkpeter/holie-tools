@@ -357,3 +357,138 @@ test(
     }
   },
 );
+
+// ---- Terugval en storingen (0.33.0) ----
+
+const deepseekOk = () =>
+  new Response(
+    JSON.stringify({
+      choices: [{
+        message: { content: "van deepseek" },
+        finish_reason: "stop",
+      }],
+    }),
+    { status: 200 },
+  );
+
+const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
+const tegoedOp = () =>
+  new Response(
+    JSON.stringify({ error: { message: "Your credit balance is too low" } }),
+    { status: 400 },
+  );
+const storingGevallen: [string, () => Response, string, number][] = [
+  ["400 credit balance too low", tegoedOp, "tegoed", 400],
+  ["429", () => new Response("{}", { status: 429 }), "fout", 429],
+  ["529", () => new Response("{}", { status: 529 }), "fout", 529],
+  [
+    "timeout",
+    () => {
+      throw new DOMException("De poging duurde te lang", "TimeoutError");
+    },
+    "fout",
+    0,
+  ],
+];
+
+for (const [naam, claudeFout, soort, status] of storingGevallen) {
+  test(
+    `terugval naar deepseek bij ${naam}, melding met storing ${soort}`,
+    async (oproepen, zet) => {
+      stelAiBeleidIn({
+        project: "ese",
+        momentopname: AI_BELEID,
+        verbruik: NEP,
+      });
+      zet((url) => {
+        if (url === NEP) return verbruikOk();
+        if (url === CLAUDE_URL) return claudeFout();
+        return deepseekOk();
+      });
+      const a = await callAi(vraag, {
+        label: "t",
+        sleutels: alle,
+        volgorde: ["anthropic", "deepseek"],
+        pogingen: 1,
+        gegevens: "publiek",
+      });
+      assertEquals(a.provider, "deepseek");
+      assertEquals(a.terugval, true);
+      await aiVerbruikVersturen();
+      const posts = verbruikPosts(oproepen);
+      assertEquals(posts.length, 1);
+      const regels = posts[0].regels;
+      assertEquals(regels.length, 1);
+      assertEquals(regels[0].provider, "deepseek");
+      assertEquals(regels[0].terugval, 1);
+      assertEquals(regels[0].storingen, [
+        { provider: "anthropic", soort, status, aantal: 1 },
+      ]);
+    },
+  );
+}
+
+test(
+  "alles faalt: storingen van beide providers in de melding",
+  async (oproepen, zet) => {
+    stelAiBeleidIn({
+      project: "ese",
+      momentopname: AI_BELEID,
+      verbruik: NEP,
+    });
+    zet((url) => {
+      if (url === NEP) return verbruikOk();
+      if (url === CLAUDE_URL) return tegoedOp();
+      return new Response("{}", { status: 429 });
+    });
+    let gegooid = false;
+    try {
+      await callAi(vraag, {
+        label: "t",
+        sleutels: alle,
+        volgorde: ["anthropic", "deepseek"],
+        pogingen: 1,
+        gegevens: "publiek",
+      });
+    } catch {
+      gegooid = true;
+    }
+    assert(gegooid);
+    await aiVerbruikVersturen();
+    const regel = verbruikPosts(oproepen)[0].regels[0];
+    assertEquals(regel.provider, "geen");
+    assertEquals(regel.fouten, 1);
+    assertEquals(
+      regel.storingen.map((s: { provider: string; soort: string }) =>
+        `${s.provider}:${s.soort}`
+      ).sort(),
+      ["anthropic:tegoed", "deepseek:fout"],
+    );
+  },
+);
+
+test(
+  "een afgekeurd antwoord (status 200) is geen storing: veld ontbreekt",
+  async (oproepen, zet) => {
+    stelAiBeleidIn({
+      project: "ese",
+      momentopname: AI_BELEID,
+      verbruik: NEP,
+    });
+    zet((url) => {
+      if (url === NEP) return verbruikOk();
+      return url === CLAUDE_URL ? claudeOk() : deepseekOk();
+    });
+    const a = await callAi(vraag, {
+      label: "t",
+      sleutels: alle,
+      volgorde: ["anthropic", "deepseek"],
+      gegevens: "publiek",
+      aanvaard: (_inhoud, provider) => provider !== "anthropic",
+    });
+    assertEquals(a.provider, "deepseek");
+    await aiVerbruikVersturen();
+    const r = verbruikPosts(oproepen)[0].regels[0];
+    assertEquals("storingen" in r, false);
+  },
+);

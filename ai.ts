@@ -56,7 +56,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.27.1";
+export const PAKKET_VERSIE = "0.33.0";
 
 /**
  * ⚠️ `meta` kan ENKEL beeld (`genereerBeeld`). Het endpoint is dat van
@@ -1377,6 +1377,16 @@ export interface VerbruikRegel {
   zonder_label: number;
   /** Aanroepen die uiteindelijk faalden. */
   fouten: number;
+  /**
+   * Providers die faalden (sinds 0.33.0): samengevoegd per provider en soort, met het aantal
+   * en de laatste status. Ontbreekt als er geen storing was.
+   */
+  storingen?: {
+    provider: string;
+    soort: "tegoed" | "fout";
+    status: number;
+    aantal: number;
+  }[];
 }
 
 const wachtrij = new Map<string, VerbruikRegel>();
@@ -1423,6 +1433,8 @@ export interface VerbruikMelding {
   label?: boolean;
   /** Faalde de aanroep? */
   fout?: boolean;
+  /** Providers die tijdens deze aanroep faalden (sinds 0.33.0), ook als een andere slaagde. */
+  storingen?: { provider: string; soort: "tegoed" | "fout"; status?: number }[];
 }
 
 /**
@@ -1461,6 +1473,19 @@ export function meldAiVerbruik(melding: VerbruikMelding): void {
     if (melding.terugval) regel.terugval += 1;
     if (!melding.label) regel.zonder_label += 1;
     if (melding.fout) regel.fouten += 1;
+    for (const st of melding.storingen ?? []) {
+      const sp = String(st.provider || "geen").replace(/-vision$/, "");
+      const soort = st.soort === "tegoed" ? "tegoed" : "fout";
+      const lijst = regel.storingen ??= [];
+      const bestaand = lijst.find((x) =>
+        x.provider === sp && x.soort === soort
+      );
+      const status = Number.isInteger(st.status) ? st.status as number : 0;
+      if (bestaand) {
+        bestaand.aantal += 1;
+        bestaand.status = status;
+      } else lijst.push({ provider: sp, soort, status, aantal: 1 });
+    }
     wachtrij.set(sleutel, regel);
     planVerbruik(url);
   } catch {
@@ -1517,7 +1542,13 @@ async function verstuurVerbruik(url: string): Promise<void> {
   while (wachtrij.size > 0) {
     const regels: VerbruikRegel[] = [];
     for (const [k, r] of wachtrij) {
-      regels.push({ ...r, usd: Math.round(r.usd * 1e6) / 1e6 });
+      regels.push({
+        ...r,
+        usd: Math.round(r.usd * 1e6) / 1e6,
+        ...(r.storingen?.length
+          ? { storingen: r.storingen.map((x) => ({ ...x })) }
+          : {}),
+      });
       wachtrij.delete(k);
       if (regels.length >= VERBRUIK_MAX_REGELS) break;
     }
@@ -1562,7 +1593,10 @@ export async function aiVerbruikVersturen(): Promise<void> {
 
 /** Wat nog niet verstuurd is (voor tests en diagnose). */
 export function aiVerbruikWachtrij(): VerbruikRegel[] {
-  return [...wachtrij.values()].map((r) => ({ ...r }));
+  return [...wachtrij.values()].map((r) => ({
+    ...r,
+    ...(r.storingen ? { storingen: r.storingen.map((x) => ({ ...x })) } : {}),
+  }));
 }
 
 /** Leegt de wachtrij zonder te versturen (tests). */
@@ -1632,11 +1666,24 @@ export async function callAi(
     (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
   let usd = 0;
   const label = opties.gegevens !== undefined;
+  // Providers die faalden (status >= 400 of 0): één keer per provider en soort per aanroep.
+  const storingen: NonNullable<VerbruikMelding["storingen"]> = [];
   try {
     const a = await callAiKern(messages, {
       ...opties,
       bijFout: (p) => {
         usd += kostVan(p.model, p.usage);
+        if ((p.status >= 400 || p.status === 0) && !opties.signal?.aborted) {
+          const soort = isTegoedFout(p.status, p.fout ?? "")
+            ? "tegoed"
+            : "fout";
+          const prov = String(p.provider).replace(/-vision$/, "");
+          const bestaand = storingen.find((x) =>
+            x.provider === prov && x.soort === soort
+          );
+          if (bestaand) bestaand.status = p.status;
+          else storingen.push({ provider: prov, soort, status: p.status });
+        }
         return opties.bijFout?.(p);
       },
     });
@@ -1647,10 +1694,19 @@ export async function callAi(
       usd: usd + kostVan(a.model, a.usage),
       terugval: !!a.terugval,
       label,
+      ...(storingen.length ? { storingen } : {}),
     });
     return a;
   } catch (e) {
-    meldAiVerbruik({ project, provider: "geen", type, usd, label, fout: true });
+    meldAiVerbruik({
+      project,
+      provider: "geen",
+      type,
+      usd,
+      label,
+      fout: true,
+      ...(storingen.length ? { storingen } : {}),
+    });
     throw e;
   }
 }

@@ -394,6 +394,17 @@ bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit 
   "afgebroken" zijn `info`, geen rode fout); `urlZonderGoogleTerug` kuist de URL
   op en laat `next` staan.
 
+## Nieuw in 0.33.0 (ai): storingen in de verbruiksmelding
+
+`callAi` verzamelt per aanroep de providers die faalden (status >= 400 of 0 bij
+timeout/netwerk; niet afgekapt, afgekeurd of lege inhoud) en stuurt ze mee als
+`storingen: [{ provider, soort: "tegoed" | "fout", status, aantal }]` op de
+regel van `POST /verbruik` (weggelaten als er geen waren). `soort` is `tegoed`
+bij `isTegoedFout`, anders `fout`. De Worker telt ze op in D1-tabel `storing`
+(schema in `beleid/verbruik.sql`, per dag, provider, soort en project) en toont
+ze op `GET /storing?dag=YYYY-MM-DD` (zelfde leessleutel als `GET /verbruik`):
+`{ dag, storingen: [{ dag, provider, soort, project, aantal, status, eerste, laatste }] }`.
+
 ## Nieuw in 0.27.1 (ai): `aiVerbruikVersturen` wacht op lopende verzendingen
 
 In een Cloudflare Worker vertrekt de verbruiksmelding meteen, dus de wachtrij

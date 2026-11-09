@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -47,6 +47,8 @@
       "google-terug.ts",
       "gebruikers.ts",
       "sql/gebruikers.sql",
+      "beleid/python/holie_ai_beleid.py",
+      "beleid/python/holie_ai.py",
       "README.md",
       "LICENSE"
     ]

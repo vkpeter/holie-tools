@@ -8,8 +8,10 @@ type Rij = Record<string, string | number>;
 
 function nepD1() {
   const rijen = new Map<string, Rij>();
+  const storingen = new Map<string, Rij>();
   const db = {
     rijen,
+    storingen,
     prepare(sql: string) {
       return {
         sql,
@@ -18,6 +20,12 @@ function nepD1() {
           return { ...this, args };
         },
         all() {
+          if (this.sql.includes("FROM storing")) {
+            const [dag] = this.args as string[];
+            return Promise.resolve({
+              results: [...storingen.values()].filter((r) => r.dag === dag),
+            });
+          }
           const [van, tot] = this.args as string[];
           const results = [...rijen.values()].filter((r) =>
             String(r.dag) >= van && String(r.dag) <= tot
@@ -28,6 +36,29 @@ function nepD1() {
     },
     batch(stmts: { sql: string; args: unknown[] }[]) {
       for (const s of stmts) {
+        if (s.sql.includes("INTO storing")) {
+          const [dag, provider, soort, project, aantal, status, tijd] = s
+            .args as [string, string, string, string, number, number, string];
+          const k = [dag, provider, soort, project].join("|");
+          const oud = storingen.get(k);
+          if (!oud) {
+            storingen.set(k, {
+              dag,
+              provider,
+              soort,
+              project,
+              aantal,
+              status,
+              eerste: tijd,
+              laatste: tijd,
+            });
+          } else {
+            oud.aantal = Number(oud.aantal) + aantal;
+            oud.status = status;
+            oud.laatste = tijd;
+          }
+          continue;
+        }
         const [dag, project, provider, type, aanroepen, usd, t, z, f, tijd] = s
           .args as [
             string,
@@ -176,6 +207,96 @@ Deno.test("GET /verbruik vraagt de leessleutel", async () => {
   assertEquals(
     (await lees({ ...e, VERBRUIK_LEESSLEUTEL: "" }, "")).status,
     401,
+  );
+});
+
+const leesStoring = (e: unknown, sleutel?: string, query = "") =>
+  worker.fetch(
+    new Request(`https://beleid.holie.be/storing${query}`, {
+      headers: sleutel ? { authorization: `Bearer ${sleutel}` } : {},
+    }),
+    e,
+    { waitUntil() {} },
+  );
+
+Deno.test("POST /verbruik met storingen schrijft in de tabel storing", async () => {
+  const e = env();
+  const st = [
+    { provider: "anthropic", soort: "tegoed", status: 400, aantal: 2 },
+    { provider: "deepseek", soort: "fout", status: 0, aantal: 1 },
+  ];
+  assertEquals(
+    (await post(e, { regels: [regel({ storingen: st })] })).status,
+    200,
+  );
+  const nog = {
+    provider: "anthropic",
+    soort: "tegoed",
+    status: 402,
+    aantal: 3,
+  };
+  assertEquals(
+    (await post(e, { regels: [regel({ storingen: [nog] })] })).status,
+    200,
+  );
+  assertEquals(e.VERBRUIK.storingen.size, 2);
+  const a = e.VERBRUIK.storingen.get(
+    [brusselseDag(), "anthropic", "tegoed", "foodie"].join("|"),
+  )!;
+  assertEquals(a.aantal, 5);
+  assertEquals(a.status, 402);
+  // zonder storingen blijft de tabel leeg en de regel werkt gewoon
+  const e2 = env();
+  assertEquals((await post(e2, { regels: [regel()] })).status, 200);
+  assertEquals(e2.VERBRUIK.storingen.size, 0);
+});
+
+Deno.test("POST /verbruik weigert slechte storingen", async () => {
+  const e = env();
+  const goed = { provider: "anthropic", soort: "fout", status: 429, aantal: 1 };
+  for (
+    const slecht of [
+      "geen array",
+      [{ ...goed, provider: "Anthropic!" }],
+      [{ ...goed, provider: 5 }],
+      [{ ...goed, soort: "boos" }],
+      [{ ...goed, aantal: 0 }],
+      [{ ...goed, aantal: 100001 }],
+      [{ ...goed, aantal: 1.5 }],
+      [{ ...goed, status: 1000 }],
+      [{ ...goed, status: -1 }],
+      Array(11).fill(goed),
+      [null],
+    ]
+  ) {
+    assertEquals(
+      (await post(e, { regels: [regel({ storingen: slecht })] })).status,
+      400,
+      JSON.stringify(slecht),
+    );
+  }
+  assertEquals(e.VERBRUIK.rijen.size, 0);
+  assertEquals(e.VERBRUIK.storingen.size, 0);
+});
+
+Deno.test("GET /storing vraagt de leessleutel en geeft de rijen van de dag", async () => {
+  const e = env();
+  const st = { provider: "anthropic", soort: "tegoed", status: 400, aantal: 2 };
+  await post(e, { regels: [regel({ storingen: [st] })] });
+  assertEquals((await leesStoring(e)).status, 401);
+  assertEquals((await leesStoring(e, "fout")).status, 401);
+  const r = await leesStoring(e, "lees-geheim");
+  assertEquals(r.status, 200);
+  const data = await r.json();
+  assertEquals(data.storingen.length, 1);
+  assertEquals(data.storingen[0].provider, "anthropic");
+  assertEquals(data.storingen[0].aantal, 2);
+  const leeg = await (await leesStoring(e, "lees-geheim", "?dag=2020-01-01"))
+    .json();
+  assertEquals(leeg.storingen, []);
+  assertEquals(
+    (await leesStoring(e, "lees-geheim", "?dag=morgen")).status,
+    400,
   );
 });
 

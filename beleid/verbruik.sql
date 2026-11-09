@@ -16,3 +16,18 @@ CREATE TABLE IF NOT EXISTS verbruik (
   bijgewerkt TEXT NOT NULL,
   PRIMARY KEY (dag, project, provider, type)
 );
+
+-- Storingen (0.33.0): welke provider faalde, per dag en project. Gevuld via `storingen` op een
+-- regel van POST /verbruik; gelezen door GET /storing?dag= (VPS-taak ai_storing, Telegram per
+-- provider per dag). soort = tegoed (credit balance) of fout (429, 5xx, timeout).
+CREATE TABLE IF NOT EXISTS storing (
+  dag TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  soort TEXT NOT NULL,
+  project TEXT NOT NULL,
+  aantal INTEGER NOT NULL DEFAULT 0,
+  status INTEGER NOT NULL DEFAULT 0,
+  eerste TEXT NOT NULL,
+  laatste TEXT NOT NULL,
+  PRIMARY KEY (dag, provider, soort, project)
+);

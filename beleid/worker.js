@@ -10,8 +10,13 @@
  *   GET  /historie/<volgnummer>                      (met leessleutel) een ouder envelop
  *   POST /verbruik                                   dagregels van @holie/tools (>= 0.26.0),
  *                                                    opgeteld in D1; zonder geheim, begrensd
+ *                                                    Per regel mag een `storingen`-array mee
+ *                                                    (>= 0.33.0): [{ provider, soort: "tegoed" | "fout",
+ *                                                    status, aantal }], opgeteld in D1-tabel `storing`
  *   GET  /verbruik?van=&tot=                         de dagteller, enkel met
  *                                                    `Authorization: Bearer <VERBRUIK_LEESSLEUTEL>`
+ *   GET  /storing?dag=YYYY-MM-DD                     (met dezelfde leessleutel) de storingen van een dag
+ *                                                    (standaard vandaag Brussel): { storingen: [...] }
  *
  * Er staat GEEN geheim in deze Worker: de handtekening is de schrijfsleutel. Wie de
  * privésleutel niet heeft, kan niets publiceren; een oud ondertekend bestand opnieuw
@@ -150,6 +155,21 @@ export function regelFout(r, nu = Date.now()) {
   for (const veld of ["terugval", "zonder_label", "fouten"]) {
     if (!geheelTussen(r[veld] ?? 0, 0, r.aanroepen)) return veld;
   }
+  if (r.storingen !== undefined) {
+    if (!Array.isArray(r.storingen) || r.storingen.length > 10) {
+      return "storingen";
+    }
+    for (const st of r.storingen) {
+      if (!st || typeof st !== "object") return "storing";
+      if (
+        typeof st.provider !== "string" ||
+        !/^[a-z0-9-]{1,30}$/.test(st.provider)
+      ) return "storing.provider";
+      if (st.soort !== "tegoed" && st.soort !== "fout") return "storing.soort";
+      if (!geheelTussen(st.aantal, 1, 100000)) return "storing.aantal";
+      if (!geheelTussen(st.status ?? 0, 0, 999)) return "storing.status";
+    }
+  }
   return null;
 }
 
@@ -165,6 +185,15 @@ const UPSERT = `INSERT INTO verbruik
     bijgewerkt = excluded.bijgewerkt
   WHERE verbruik.usd + excluded.usd <= ${VERBRUIK_MAX_USD_DAG}
     AND verbruik.aanroepen + excluded.aanroepen <= 1000000`;
+
+const UPSERT_STORING = `INSERT INTO storing
+  (dag, provider, soort, project, aantal, status, eerste, laatste)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+  ON CONFLICT (dag, provider, soort, project) DO UPDATE SET
+    aantal = aantal + excluded.aantal,
+    status = excluded.status,
+    laatste = excluded.laatste
+  WHERE storing.aantal + excluded.aantal <= 1000000`;
 
 export async function ontvangVerbruik(request, env) {
   if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
@@ -197,20 +226,37 @@ export async function ontvangVerbruik(request, env) {
   }
   const tijd = new Date(nu).toISOString();
   const stmt = env.VERBRUIK.prepare(UPSERT);
-  await env.VERBRUIK.batch(regels.map((r) =>
-    stmt.bind(
-      r.dag,
-      r.project,
-      r.provider,
-      r.type,
-      r.aanroepen,
-      r.usd,
-      r.terugval ?? 0,
-      r.zonder_label ?? 0,
-      r.fouten ?? 0,
-      tijd,
+  const stmtStoring = env.VERBRUIK.prepare(UPSERT_STORING);
+  const storingen = regels.flatMap((r) =>
+    (r.storingen ?? []).map((st) =>
+      stmtStoring.bind(
+        r.dag,
+        st.provider,
+        st.soort,
+        r.project,
+        st.aantal,
+        st.status ?? 0,
+        tijd,
+      )
     )
-  ));
+  );
+  await env.VERBRUIK.batch([
+    ...regels.map((r) =>
+      stmt.bind(
+        r.dag,
+        r.project,
+        r.provider,
+        r.type,
+        r.aanroepen,
+        r.usd,
+        r.terugval ?? 0,
+        r.zonder_label ?? 0,
+        r.fouten ?? 0,
+        tijd,
+      )
+    ),
+    ...storingen,
+  ]);
   return antwoord({ ok: true, regels: regels.length });
 }
 
@@ -254,6 +300,26 @@ export async function leesVerbruik(request, env) {
        ORDER BY dag, project, provider, type LIMIT 5000`,
   ).bind(van, tot).all();
   return antwoord({ van, tot, regels: results ?? [] }, 200, {
+    "cache-control": "no-store",
+  });
+}
+
+/** GET /storing?dag=YYYY-MM-DD: de storingen van een dag, met dezelfde leessleutel als /verbruik. */
+export async function leesStoring(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const geweigerd = await leesWeigering(request, env);
+  if (geweigerd) return geweigerd;
+  const url = new URL(request.url);
+  const dag = url.searchParams.get("dag") || brusselseDag();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dag)) {
+    return antwoord({ fout: "dag als YYYY-MM-DD" }, 400);
+  }
+  const { results } = await env.VERBRUIK.prepare(
+    `SELECT dag, provider, soort, project, aantal, status, eerste, laatste
+       FROM storing WHERE dag = ?1
+       ORDER BY provider, soort, project LIMIT 1000`,
+  ).bind(dag).all();
+  return antwoord({ dag, storingen: results ?? [] }, 200, {
     "cache-control": "no-store",
   });
 }
@@ -344,6 +410,9 @@ export default {
     }
     if (pad === "/verbruik" && request.method === "GET") {
       return await leesVerbruik(request, env);
+    }
+    if (pad === "/storing" && request.method === "GET") {
+      return await leesStoring(request, env);
     }
 
     return antwoord({ fout: "niet gevonden" }, 404);
