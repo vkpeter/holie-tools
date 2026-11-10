@@ -176,6 +176,58 @@ def test_standaardvolgorde_uit_beleid_met_lovable_en_onbekende_provider():
     assert oproepen == [holie_ai.ANTHROPIC_URL, holie_ai.LOVABLE_URL]
 
 
+
+BELEID_V18 = json.loads((HIER.parent / "ai-beleid.json").read_text(encoding="utf-8"))
+ALLE = {"ANTHROPIC_API_KEY": "sk-ant-test-12345678", "GEMINI_API_KEY": "gem-test-12345678",
+        "LOVABLE_API_KEY": "lov-test-12345678", "DEEPSEEK_API_KEY": "sk-ds-test-12345678",
+        "META_MODEL_API_KEY": "meta-test-12345678"}
+
+
+def test_meta_is_laatste_tekstschakel():
+    oproepen = []
+
+    def http(url, headers, body, timeout):
+        oproepen.append((url, headers.get("authorization"), json.loads(body)["model"]))
+        return (200, OK_DS) if url == holie_ai.META_URL else (503, "weg")
+    uit = holie_ai.call_ai(MSG, project="domus", label="t", gegevens="prive-peter", env=ALLE,
+                           beleid=BELEID_V18, http=http)
+    assert uit["provider"] == "meta" and uit["model"] == "muse-spark-1.3" and uit["terugval"]
+    assert [u for u, _, _ in oproepen] == [holie_ai.ANTHROPIC_URL, holie_ai.GEMINI_URL,
+                                          holie_ai.LOVABLE_URL, holie_ai.DEEPSEEK_URL,
+                                          holie_ai.META_URL]
+    assert oproepen[-1][1] == "Bearer meta-test-12345678"
+
+
+def test_meta_niet_voor_persoon_en_niet_buiten_tekst():
+    oproepen = []
+
+    def http(url, headers, body, timeout):
+        oproepen.append(url)
+        return 503, "weg"
+    for gegevens, type_ in (("persoon", "tekst"), ("prive-peter", "tools")):
+        try:
+            holie_ai.call_ai(MSG, project="x", label="t", gegevens=gegevens, type=type_, env=ALLE,
+                             beleid=BELEID_V18, http=http)
+        except holie_ai.AiOnbeschikbaar:
+            pass
+    assert holie_ai.META_URL not in oproepen and len(oproepen) > 0
+
+
+def test_meta_zonder_sleutel_valt_weg():
+    env = {k: v for k, v in ALLE.items() if k != "META_MODEL_API_KEY"}
+    oproepen = []
+
+    def http(url, headers, body, timeout):
+        oproepen.append(url)
+        return 503, "weg"
+    try:
+        holie_ai.call_ai(MSG, project="x", label="t", gegevens="publiek", env=env,
+                         beleid=BELEID_V18, http=http)
+    except holie_ai.AiOnbeschikbaar:
+        pass
+    assert holie_ai.META_URL not in oproepen and len(oproepen) == 4
+
+
 if __name__ == "__main__":
     # Zonder pytest (staat niet op de VPS of de laptop): elke test_-functie draaien.
     fouten = 0

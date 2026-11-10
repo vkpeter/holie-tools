@@ -1,4 +1,4 @@
-"""Eén AI-aanroep voor Python-code, met terugval volgens het AI-beleid (nu Claude, Gemini, Lovable, DeepSeek).
+"""Eén AI-aanroep voor Python-code, met terugval volgens het AI-beleid (nu Claude, Gemini, Lovable, DeepSeek, Meta).
 
 Python-tegenhanger van `callAi` in @holie/tools. Enkel de standaardbibliotheek, naast
 `holie_ai_beleid` (zelfde map). Op de VPS: /opt/holie/lib/python (PYTHONPATH); lokaal:
@@ -10,8 +10,9 @@ PYTHONPATH naar holie-tools/beleid/python.
     uit["content"], uit["provider"], uit["terugval"]
 
 De volgorde komt uit het AI-beleid (`kies_providers`, standaard de basisvolgorde van het type);
-een provider zonder sleutel of die deze client niet kent (bv. meta voor tekst) valt weg, DeepSeek
-blijft eruit waar het beleid dat voor de gegevens eist (bv. "persoon").
+een provider zonder sleutel of die deze client niet kent valt weg, DeepSeek en Meta blijven eruit
+waar het beleid dat voor de gegevens eist (bv. "persoon"). Meta (Muse) doet enkel type "tekst"
+(py-1.3.0, zoals `callAi` sinds 0.33.0).
 Terugval naar de volgende provider bij: 400/401/402 met "credit" of "balance" in de tekst (tegoed
 op: die provider 10 min overgeslagen), 429, 5xx (ook 529), timeout, netwerkfout en elke andere
 4xx (zonder cache). Verbruik en storingen gaan naar de centrale teller. Nooit een sleutel in
@@ -38,15 +39,20 @@ STANDAARD_MODELLEN = {
     "deepseek": "deepseek-v4-flash",
     "gemini": "gemini-3.5-flash-lite",
     "lovable": "google/gemini-3-flash-preview",
+    "meta": "muse-spark-1.3",
 }
 SLEUTELS = {"anthropic": "ANTHROPIC_API_KEY", "deepseek": "DEEPSEEK_API_KEY",
-            "gemini": "GEMINI_API_KEY", "lovable": "LOVABLE_API_KEY"}
+            "gemini": "GEMINI_API_KEY", "lovable": "LOVABLE_API_KEY",
+            "meta": "META_MODEL_API_KEY"}
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSIE = "2023-06-01"
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 LOVABLE_URL = "https://ai.gateway.lovable.dev/v1/chat/completions"
-URLS = {"deepseek": DEEPSEEK_URL, "gemini": GEMINI_URL, "lovable": LOVABLE_URL}
+META_URL = "https://api.meta.ai/v1/chat/completions"  # Muse, OpenAI-vorm (zelfde als META_CHAT_ENDPOINT)
+URLS = {"deepseek": DEEPSEEK_URL, "gemini": GEMINI_URL, "lovable": LOVABLE_URL, "meta": META_URL}
+# Tools en beeld-in zijn voor Meta niet nagemeten: enkel tekst.
+ENKEL_TEKST = {"meta"}
 
 HttpFn = Callable[[str, dict, bytes, float], "tuple[int, str]"]
 
@@ -159,7 +165,8 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
             type: str = "tekst", volgorde: list[str] | None = None, system: str | None = None,
             max_tokens: int = 2048, temperature: float | None = None, timeout: float = 120,
             anthropic_model: str | None = None, deepseek_model: str | None = None,
-            gemini_model: str | None = None, lovable_model: str | None = None, env: dict | None = None,
+            gemini_model: str | None = None, lovable_model: str | None = None,
+            meta_model: str | None = None, env: dict | None = None,
             beleid: dict | None = None, http: HttpFn | None = None) -> dict:
     """Eén tekstaanroep met terugval. Geeft {"content","provider","model","usage","terugval",
     "finish_reason"}. Gooit AiOnbeschikbaar als alles faalt, BeleidLeeg als het beleid of de
@@ -169,7 +176,8 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
     modellen = {"anthropic": anthropic_model or STANDAARD_MODELLEN["anthropic"],
                 "deepseek": deepseek_model or STANDAARD_MODELLEN["deepseek"],
                 "gemini": gemini_model or STANDAARD_MODELLEN["gemini"],
-                "lovable": lovable_model or STANDAARD_MODELLEN["lovable"]}
+                "lovable": lovable_model or STANDAARD_MODELLEN["lovable"],
+                "meta": meta_model or STANDAARD_MODELLEN["meta"]}
 
     def sleutel_van(p: str) -> str:
         return (env.get(SLEUTELS.get(p, "")) or "").strip()
@@ -179,7 +187,8 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
     kandidaten = list(volgorde) if volgorde else None  # None = basisvolgorde uit het beleid
     uitslag = beleid_mod.kies_providers(
         beleid, type=type, project=project, gegevens=gegevens, volgorde=kandidaten,
-        heeft_sleutel=lambda p: p in SLEUTELS and bool(sleutel_van(p)))
+        heeft_sleutel=lambda p: (p in SLEUTELS and bool(sleutel_van(p))
+                               and (type == "tekst" or p not in ENKEL_TEKST)))
     for w in uitslag["waarschuwingen"]:
         logger.warning("[ai:%s] beleid: %s", label, w)
     for stap in uitslag["stappen"]:

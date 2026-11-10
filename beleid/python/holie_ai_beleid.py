@@ -38,7 +38,7 @@ from typing import Callable, Iterable
 
 BELEID_URL = "https://beleid.holie.be/ai-beleid.json"
 BELEID_PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="
-PAKKET_VERSIE = "py-1.2.0"
+PAKKET_VERSIE = "py-1.3.0"
 VERS_S = 5 * 60
 MAX_S = 24 * 60 * 60
 
