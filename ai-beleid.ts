@@ -19,7 +19,6 @@ export const AI_BELEID: AiBeleid = {
       "gemini",
       "lovable",
       "deepseek",
-      "meta",
     ],
     "tools": [
       "anthropic",
@@ -214,6 +213,35 @@ export const AI_BELEID: AiBeleid = {
       "gegevens": "persoon",
       "omschrijving":
         "Tickbook-klantmail (verslag-ai.ts): Claude, DeepSeek als terugval",
+      "verboden": [
+        {
+          "datum": "2026-11-10",
+          "reden":
+            "Staat niet als verwerker in de privacytekst van Tickbook voor klantteksten (Peter, 1 nov 2026).",
+          "provider": "gemini",
+          "wie": "Peter",
+          "bron":
+            "billaraapp supabase/functions/_shared/verslag-ai.ts (commentaar 1 nov 2026)",
+        },
+        {
+          "datum": "2026-11-10",
+          "reden":
+            "Staat niet als verwerker in de privacytekst van Tickbook voor klantteksten (Peter, 1 nov 2026).",
+          "provider": "lovable",
+          "wie": "Peter",
+          "bron":
+            "billaraapp supabase/functions/_shared/verslag-ai.ts (commentaar 1 nov 2026)",
+        },
+        {
+          "datum": "2026-11-10",
+          "reden":
+            "Staat niet als verwerker in de privacytekst van Tickbook voor klantteksten.",
+          "provider": "meta",
+          "wie": "Peter",
+          "bron":
+            "billaraapp supabase/functions/_shared/verslag-ai.ts (commentaar 1 nov 2026)",
+        },
+      ],
     },
     "podcast-merge": {
       "gegevens": "prive-peter",
@@ -224,13 +252,17 @@ export const AI_BELEID: AiBeleid = {
       "gegevens": "publiek",
       "omschrijving": "Korte triage van gefaalde smokes en CI-runs op de VPS",
     },
+    "smoke-herstel": {
+      "gegevens": "publiek",
+      "omschrijving":
+        "VPS-agent die een gefaalde Playwright-smoke herstelt of beoordeelt (jobs/smoke-herstel-agent.ts). Leest enkel testcode en publieke pagina's.",
+    },
   },
   "providers": {
     "meta": {
-      "naam": "Meta Model API (Muse)",
+      "naam": "Meta Model API (Muse Image)",
       "aanroepbaar": true,
       "capaciteiten": [
-        "tekst",
         "beeld-uit",
       ],
     },
@@ -346,8 +378,8 @@ export const AI_BELEID: AiBeleid = {
       ],
     },
   },
-  "uitgegeven": "2026-11-08",
-  "volgnummer": 15,
+  "uitgegeven": "2026-11-09T23:50:48Z",
+  "volgnummer": 17,
   "toelatingen": [
     {
       "wie": "Peter",

@@ -507,9 +507,20 @@ const metaOk = () =>
 test(
   "tekst: anthropic 400 credit, deepseek 529 -> meta op het chat-endpoint met muse-spark-1.3",
   async (oproepen, zet) => {
+    // Meta voor tekst staat nog niet in het live beleid (v17): hier zelf aanzetten.
+    const metaVoorTekst = {
+      ...AI_BELEID,
+      providers: {
+        ...AI_BELEID.providers,
+        meta: {
+          ...AI_BELEID.providers.meta,
+          capaciteiten: ["tekst", "beeld-uit"],
+        },
+      },
+    } as typeof AI_BELEID;
     stelAiBeleidIn({
       project: "ese",
-      momentopname: AI_BELEID,
+      momentopname: metaVoorTekst,
       verbruik: NEP,
     });
     zet((url) => {
