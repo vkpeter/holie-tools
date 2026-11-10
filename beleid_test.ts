@@ -447,6 +447,7 @@ Deno.test("startbeleid: Claude vooraan voor tekst, tot het einde van de voorrang
     "gemini",
     "lovable",
     "deepseek",
+    "meta",
   ]);
 });
 
