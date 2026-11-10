@@ -56,7 +56,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.33.2";
+export const PAKKET_VERSIE = "0.33.3";
 
 /**
  * `meta` doet beeld-uit (`genereerBeeld`, endpoint `ENDPOINT.meta`) en sinds 0.33.0 ook gewone

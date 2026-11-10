@@ -15,13 +15,15 @@ Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 
 ## Versie bumpen in de apps
 
-> **Regel: package.json en bun.lock gaan samen in één commit.** Een bump die enkel
-> package.json raakt, breekt `bun install --frozen-lockfile` (10 nov 2026: Hapklik
-> stond op ^0.30.1 met een bun.lock op 0.28.1; pas de smoke van 05:09 merkte het).
+> **Regel: package.json en bun.lock gaan samen in één commit.** Een bump die
+> enkel package.json raakt, breekt `bun install --frozen-lockfile` (10 nov 2026:
+> Hapklik stond op ^0.30.1 met een bun.lock op 0.28.1; pas de smoke van 05:09
+> merkte het).
 
-Gebruik `scripts/bump-apps.sh`; het zet de versie, draait `bun install`, controleert met
-`bun install --frozen-lockfile` en commit beide bestanden als `Peter <ai@holie.be>`
-(geen trailer). Bij een fout zet het die repo terug zoals ze was.
+Gebruik `scripts/bump-apps.sh`; het zet de versie, draait `bun install`,
+controleert met `bun install --frozen-lockfile` en commit beide bestanden als
+`Peter <ai@holie.be>` (geen trailer). Bij een fout zet het die repo terug zoals
+ze was.
 
 ```bash
 scripts/bump-apps.sh 0.33.1 hapklik arrif shintaka-forge-art            # droog (standaard)
@@ -29,10 +31,12 @@ scripts/bump-apps.sh --uitvoeren 0.33.1 hapklik arrif shintaka-forge-art  # bump
 scripts/bump-apps.sh --uitvoeren --push 0.33.1 hapklik                   # ook pushen
 ```
 
-- Een repo met onopgeslagen wijzigingen in package.json of bun.lock wordt overgeslagen.
-- Repo's met een `package-lock.json` (Hapklik, Shintaka, Phyllox) behouden die ongewijzigd;
-  het script waarschuwt.
-- Pushen kost per app een VPS-build: liever zonder `--push` en dan zelf bundelen.
+- Een repo met onopgeslagen wijzigingen in package.json of bun.lock wordt
+  overgeslagen.
+- Repo's met een `package-lock.json` (Hapklik, Shintaka, Phyllox) behouden die
+  ongewijzigd; het script waarschuwt.
+- Pushen kost per app een VPS-build: liever zonder `--push` en dan zelf
+  bundelen.
 - De VPS-CI (`ci-uitrol.sh`) draait voor elke repo met een `bun.lock` eerst
   `bun install --frozen-lockfile`, dus een vergeten lockfile faalt bij de push.
 
