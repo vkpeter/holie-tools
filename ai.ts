@@ -28,6 +28,7 @@ import {
   BeleidLeeg,
   controleerEnvelop,
   type Gegevens,
+  geldendeToelating,
   type KeuzeStap,
   type KeuzeUitslag,
   kiesProviders,
@@ -56,7 +57,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.33.4";
+export const PAKKET_VERSIE = "0.34.0";
 
 /**
  * `meta` doet beeld-uit (`genereerBeeld`, endpoint `ENDPOINT.meta`) en sinds 0.33.0 ook gewone
@@ -506,6 +507,23 @@ export interface AiOpties extends BeleidOpties {
    * een system-bericht: elk verschil in het vaste deel maakt de cache ongeldig.
    */
   cacheTtl?: "5m" | "1h" | false;
+  /**
+   * Het vaste deel van het system-bericht (sinds 0.34.0): tekst die bij elke aanroep gelijk is
+   * (instructies, profiel, criteria). Krijgt het cache-breakpoint. Alles wat per aanroep
+   * verschilt hoort in `systemVariabel` of in een system-bericht in `messages`: dat komt NA het
+   * breakpoint en maakt de cache dus niet ongeldig. Andere providers krijgen beide delen
+   * samengevoegd als één system-bericht, vooraan.
+   */
+  systemVast?: string;
+  /** Het variabele deel van het system-bericht (sinds 0.34.0), zie `systemVast`. Nooit gecachet. */
+  systemVariabel?: string;
+  /**
+   * `"auto"` (sinds 0.34.0) zet daarbovenop een top-level `cache_control`: het breakpoint
+   * schuift mee met het gesprek, zodat een multi-turn gesprek of een tool-lus elke beurt de
+   * vorige beurten uit de cache leest. Standaard `"vast"` (enkel het breakpoint op system/tools).
+   * Dezelfde TTL als `cacheTtl`; zonder cache (`cacheTtl: false`) geen effect.
+   */
+  cacheModus?: "vast" | "auto";
   /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
   /** Model op Meta Muse (standaard `STANDAARD_MODELLEN.meta`). */
@@ -679,6 +697,9 @@ export function bouwAnthropicBody(opties: {
   toolChoice?: unknown;
   responseFormat?: Record<string, unknown>;
   cacheTtl?: "5m" | "1h" | false;
+  systemVast?: string;
+  systemVariabel?: string;
+  cacheModus?: "vast" | "auto";
 }): Record<string, unknown> {
   const cacheTtl = opties.cacheTtl === undefined ? "5m" : opties.cacheTtl;
   const markering = cacheTtl
@@ -689,6 +710,8 @@ export function bouwAnthropicBody(opties: {
     }
     : {};
   const systeem: string[] = [];
+  // Vaste instructies die de body zelf toevoegt (afgedwongen tool, JSON-antwoord).
+  const instructies: string[] = [];
   const berichten: { role: string; content: Blok[] }[] = [];
   const voegToe = (role: string, blokken: Blok[]) => {
     if (blokken.length === 0) return;
@@ -758,31 +781,64 @@ export function bouwAnthropicBody(opties: {
     const keuze = opties.toolChoice as Blok | string | undefined;
     if (keuze === "none") body.tool_choice = { type: "none" };
     else if (keuze === "required") {
-      systeem.push("Gebruik een van de beschikbare tools voor je antwoord.");
+      instructies.push(
+        "Gebruik een van de beschikbare tools voor je antwoord.",
+      );
     } else if (keuze && typeof keuze === "object") {
       const naam = keuze.function?.name ?? keuze.name;
-      if (naam) systeem.push(`Gebruik de tool ${naam} voor je antwoord.`);
+      if (naam) instructies.push(`Gebruik de tool ${naam} voor je antwoord.`);
     }
   }
 
   if (opties.responseFormat?.type === "json_object") {
-    systeem.push(
+    instructies.push(
       "Antwoord uitsluitend met één geldig JSON-object, zonder uitleg en zonder codeblok.",
     );
   }
-  if (systeem.length > 0) {
+  // Vast deel (gecachet) en variabel deel (erachter, nooit gecachet). Zonder `systemVast`
+  // blijft het gedrag van vóór 0.34.0: alles uit `messages` is het vaste deel.
+  const vast = opties.systemVast
+    ? [opties.systemVast, ...instructies]
+    : [...systeem, ...instructies];
+  const variabel = [
+    ...(opties.systemVast ? systeem : []),
+    ...(opties.systemVariabel ? [opties.systemVariabel] : []),
+  ];
+  if (vast.length > 0 || variabel.length > 0) {
     // Eén breakpoint op het einde van het vaste deel dekt tools + system (volgorde
     // tools > system > messages). Onder het minimum van het model (512 tokens voor
     // Haiku 5.5 en Sonnet 5.5) wordt er stil niets gecachet: geen fout, geen meerkost.
-    body.system = cacheTtl
-      ? [{ type: "text", text: systeem.join("\n\n"), ...markering }]
-      : systeem.join("\n\n");
+    const blokken: Blok[] = [];
+    if (vast.length > 0) {
+      blokken.push({ type: "text", text: vast.join("\n\n"), ...markering });
+    }
+    if (variabel.length > 0) {
+      blokken.push({ type: "text", text: variabel.join("\n\n") });
+    }
+    body.system = cacheTtl ? blokken : blokken.map((b) => b.text).join("\n\n");
   } else if (cacheTtl && Array.isArray(body.tools) && body.tools.length > 0) {
     // Geen system, wel tools: het breakpoint op de laatste tool.
     const tools = body.tools as Blok[];
     tools[tools.length - 1] = { ...tools[tools.length - 1], ...markering };
   }
+  if (cacheTtl && opties.cacheModus === "auto") {
+    // Automatisch breakpoint dat met het gesprek meeschuift (zelfde TTL: een andere geeft een 400).
+    body.cache_control = markering.cache_control;
+  }
   return body;
+}
+
+/**
+ * Voor providers zonder cache: `systemVast` en `systemVariabel` samengevoegd als één
+ * system-bericht vooraan. Zonder die opties blijven de berichten ongewijzigd.
+ */
+function metSysteemDelen(
+  messages: unknown[],
+  opties: { systemVast?: string; systemVariabel?: string },
+): unknown[] {
+  const tekst = [opties.systemVast, opties.systemVariabel].filter((t) => !!t)
+    .join("\n\n");
+  return tekst ? [{ role: "system", content: tekst }, ...messages] : messages;
 }
 
 /** Een Messages API-antwoord in de vorm die `callAi` verder verwerkt. */
@@ -1409,7 +1465,29 @@ export interface VerbruikRegel {
     status: number;
     aantal: number;
   }[];
+  /**
+   * Cache en batch (sinds 0.34.0). Alleen aanwezig als er iets te melden valt; de Worker slaat
+   * ze op in `verbruik_extra`. `cache_*`: tokens gelezen en geschreven (5 minuten en 1 uur);
+   * `batch_aanroepen`: via de Batch API (tegen het halve tarief, al in `usd`); `batch_gewist`:
+   * batches waarvan het resultaat met DELETE gewist is; `batch_wis_mislukt`: DELETE mislukt.
+   */
+  cache_lees?: number;
+  cache_schrijf_5m?: number;
+  cache_schrijf_1u?: number;
+  batch_aanroepen?: number;
+  batch_gewist?: number;
+  batch_wis_mislukt?: number;
 }
+
+/** De extra tellers van een regel (sinds 0.34.0). */
+const EXTRA_VELDEN = [
+  "cache_lees",
+  "cache_schrijf_5m",
+  "cache_schrijf_1u",
+  "batch_aanroepen",
+  "batch_gewist",
+  "batch_wis_mislukt",
+] as const;
 
 const wachtrij = new Map<string, VerbruikRegel>();
 let verbruikTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1457,6 +1535,12 @@ export interface VerbruikMelding {
   fout?: boolean;
   /** Providers die tijdens deze aanroep faalden (sinds 0.33.0), ook als een andere slaagde. */
   storingen?: { provider: string; soort: "tegoed" | "fout"; status?: number }[];
+  /** Cache-tokens van deze aanroep (sinds 0.34.0), uit `cacheTokens(usage)`. */
+  cache?: { lees: number; schrijf5m: number; schrijf1u: number };
+  /** Liep via de Batch API: `usd` is dan al het halve tarief (sinds 0.34.0). */
+  batch?: boolean;
+  /** Stand van de DELETE op de batch: `gewist`, `mislukt` of weggelaten. */
+  batchWissen?: "gewist" | "mislukt";
 }
 
 /**
@@ -1495,6 +1579,15 @@ export function meldAiVerbruik(melding: VerbruikMelding): void {
     if (melding.terugval) regel.terugval += 1;
     if (!melding.label) regel.zonder_label += 1;
     if (melding.fout) regel.fouten += 1;
+    const tel = (veld: typeof EXTRA_VELDEN[number], n: number) => {
+      if (Number.isFinite(n) && n > 0) regel[veld] = (regel[veld] ?? 0) + n;
+    };
+    tel("cache_lees", Math.round(melding.cache?.lees ?? 0));
+    tel("cache_schrijf_5m", Math.round(melding.cache?.schrijf5m ?? 0));
+    tel("cache_schrijf_1u", Math.round(melding.cache?.schrijf1u ?? 0));
+    if (melding.batch) tel("batch_aanroepen", 1);
+    if (melding.batchWissen === "gewist") tel("batch_gewist", 1);
+    if (melding.batchWissen === "mislukt") tel("batch_wis_mislukt", 1);
     for (const st of melding.storingen ?? []) {
       const sp = String(st.provider || "geen").replace(/-vision$/, "");
       const soort = st.soort === "tegoed" ? "tegoed" : "fout";
@@ -1631,10 +1724,14 @@ export function wisAiVerbruik(): void {
 }
 
 /** De geschatte kost van een poging met `usage` (ook mislukte pogingen kosten geld). */
-function kostVan(model: string | undefined, usage: AiVerbruik | undefined) {
+function kostVan(
+  model: string | undefined,
+  usage: AiVerbruik | undefined,
+  batch = false,
+) {
   if (!model || !usage) return 0;
   try {
-    return schatUsd(model, usage).usd;
+    return schatUsd(model, usage, { batch }).usd;
   } catch {
     return 0;
   }
@@ -1687,6 +1784,13 @@ export async function callAi(
   const type: AiType = opties.type ??
     (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
   let usd = 0;
+  const cache = { lees: 0, schrijf5m: 0, schrijf1u: 0 };
+  const telCache = (u: AiVerbruik | undefined) => {
+    const c = cacheTokens(u);
+    cache.lees += c.lees;
+    cache.schrijf5m += c.schrijf5m;
+    cache.schrijf1u += c.schrijf1u;
+  };
   const label = opties.gegevens !== undefined;
   // Providers die faalden (status >= 400 of 0): één keer per provider en soort per aanroep.
   const storingen: NonNullable<VerbruikMelding["storingen"]> = [];
@@ -1695,6 +1799,7 @@ export async function callAi(
       ...opties,
       bijFout: (p) => {
         usd += kostVan(p.model, p.usage);
+        telCache(p.usage);
         if ((p.status >= 400 || p.status === 0) && !opties.signal?.aborted) {
           const soort = isTegoedFout(p.status, p.fout ?? "")
             ? "tegoed"
@@ -1716,6 +1821,7 @@ export async function callAi(
       usd: usd + kostVan(a.model, a.usage),
       terugval: !!a.terugval,
       label,
+      cache: (telCache(a.usage), cache),
       ...(storingen.length ? { storingen } : {}),
     });
     return a;
@@ -1727,6 +1833,7 @@ export async function callAi(
       usd,
       label,
       fout: true,
+      cache,
       ...(storingen.length ? { storingen } : {}),
     });
     throw e;
@@ -1821,16 +1928,23 @@ async function callAiKern(
         toolChoice: opties.toolChoice,
         responseFormat: opties.responseFormat,
         cacheTtl: opties.cacheTtl,
+        systemVast: opties.systemVast,
+        systemVariabel: opties.systemVariabel,
+        cacheModus: opties.cacheModus,
       })
       : naam === "deepseek"
       ? bouwDeepseekBody({
         model,
-        messages,
+        messages: metSysteemDelen(messages, opties),
         maxTokens,
         temperature,
         denken: opties.deepseekDenken,
       })
-      : { model, messages, ...limieten(maxTokens, temperature) };
+      : {
+        model,
+        messages: metSysteemDelen(messages, opties),
+        ...limieten(maxTokens, temperature),
+      };
     if (opties.responseFormat && naam !== "anthropic") {
       body.response_format = opties.responseFormat;
     }
@@ -3005,7 +3119,19 @@ const VAST_PER_BEELD: Record<string, number> = {
 export function schatUsd(
   model: string,
   usage?: AiVerbruik,
-): { usd: number; input: number; output: number; geschat: boolean } {
+  opties: { batch?: boolean } = {},
+): {
+  usd: number;
+  input: number;
+  output: number;
+  geschat: boolean;
+  /** Tokens uit de cache gelezen (sinds 0.34.0); ontbreekt bij een model zonder tarief. */
+  cacheLees?: number;
+  /** Tokens in de cache geschreven met 5 minuten TTL. */
+  cacheSchrijf5m?: number;
+  /** Tokens in de cache geschreven met 1 uur TTL. */
+  cacheSchrijf1u?: number;
+} {
   // Vaste prijs per beeld: het tokenverbruik doet er dan niet toe.
   const vast = VAST_PER_BEELD[model];
   if (vast !== undefined) {
@@ -3031,25 +3157,796 @@ export function schatUsd(
     geschat = true;
   }
 
-  // Prompt caching (Anthropic): een lees kost 0,1x het inputtarief, een schrijf 1,25x
-  // (5 minuten) of 2x (1 uur). `input_tokens` telt enkel wat NIET uit/naar de cache ging.
-  // Opus 5.5 leest voor 0,05x; dat verschil is hier bewust niet uitgesplitst.
-  const lees = Number(usage?.cache_read_input_tokens ?? 0);
-  const cr = usage?.cache_creation as
-    | { ephemeral_1h_input_tokens?: number }
-    | undefined;
-  const schrijfTotaal = Number(usage?.cache_creation_input_tokens ?? 0);
-  const schrijf1u = Math.min(
-    schrijfTotaal,
-    Number(cr?.ephemeral_1h_input_tokens ?? 0),
-  );
+  // Prompt caching (Anthropic): een schrijf kost 1,25x (5 minuten) of 2x (1 uur) het
+  // inputtarief, een lees 0,1x; voor Sonnet 5.5 en Opus 5.5 0,05x (voetnoot 2 van de
+  // prijstabel, gelezen 11-11-2026). `input_tokens` telt enkel wat NIET uit/naar de cache ging.
+  const c = cacheTokens(usage);
+  const leesFactor = LEES_005.has(model) ? 0.05 : 0.1;
   const cacheUsd = tarief.input *
-    (lees * 0.1 + (schrijfTotaal - schrijf1u) * 1.25 + schrijf1u * 2);
+    (c.lees * leesFactor + c.schrijf5m * 1.25 + c.schrijf1u * 2);
+  // De Batch API geeft 50% op alles (input, output en cache); de kortingen stapelen.
+  const factor = opties.batch ? 0.5 : 1;
 
   return {
-    usd: input * tarief.input + output * tarief.output + cacheUsd,
+    usd: (input * tarief.input + output * tarief.output + cacheUsd) * factor,
     input,
     output,
     geschat,
+    // Enkel bij echt cacheverkeer, zodat het resultaat zonder cache gelijk blijft aan vroeger.
+    ...(c.lees + c.schrijf5m + c.schrijf1u > 0
+      ? {
+        cacheLees: c.lees,
+        cacheSchrijf5m: c.schrijf5m,
+        cacheSchrijf1u: c.schrijf1u,
+      }
+      : {}),
   };
+}
+
+/** Modellen waarvan een cache-lees 0,05x van het inputtarief kost (de rest 0,1x). */
+const LEES_005 = new Set(["claude-sonnet-5-5", "claude-opus-5-5"]);
+
+/**
+ * De cache-tokens uit een Anthropic-`usage`: gelezen, geschreven met 5 minuten en met 1 uur TTL.
+ * Zonder uitsplitsing (`cache_creation`) telt elke schrijf als 5 minuten.
+ */
+export function cacheTokens(
+  usage?: AiVerbruik,
+): { lees: number; schrijf5m: number; schrijf1u: number } {
+  const lees = Math.max(0, Number(usage?.cache_read_input_tokens ?? 0) || 0);
+  const cr = usage?.cache_creation as
+    | { ephemeral_1h_input_tokens?: number }
+    | undefined;
+  const totaal = Math.max(
+    0,
+    Number(usage?.cache_creation_input_tokens ?? 0) || 0,
+  );
+  const schrijf1u = Math.min(
+    totaal,
+    Math.max(0, Number(cr?.ephemeral_1h_input_tokens ?? 0) || 0),
+  );
+  return { lees, schrijf5m: totaal - schrijf1u, schrijf1u };
+}
+
+// ---------------------------------------------------------------------------
+// Batch (sinds 0.34.0): Anthropic's Message Batches API achter de beleidspoort.
+// ---------------------------------------------------------------------------
+
+/** Het adres van de Message Batches API. */
+export const BATCH_URL = "https://api.anthropic.com/v1/messages/batches";
+/** Naam van de omgevingsvariabele voor een aparte batchsleutel (terugval: de gewone sleutel). */
+export const BATCH_SLEUTEL_ENV = "ANTHROPIC_BATCH_API_KEY";
+/** Providernaam waaronder het AI-beleid batch toelaat of weigert (`toelatingen`). */
+export const BATCH_BELEIDSNAAM = "anthropic-batch";
+/** Een batch bevat hoogstens zoveel verzoeken (limiet van de API). */
+export const BATCH_MAX_VERZOEKEN = 100_000;
+/** Standaard tijd tussen twee statusvragen. */
+export const BATCH_POLL_MS = 60_000;
+/** Standaard wachttijd op een batch: 24 uur (dan verloopt hij) plus een uur marge. */
+export const BATCH_MAX_WACHT_MS = 25 * 60 * 60 * 1000;
+
+/**
+ * Soorten gegevens waarvoor batch standaard mag, zonder eigen regel in het beleid. Het panel van
+ * 11-11-2026: `prive-peter` ja (mits DELETE na het ophalen), `persoon` en `gezondheid` nee. Eén
+ * toelating met provider `anthropic-batch` voor die soort gegevens (status `onderbouwd` of
+ * `testfase`, eventueel per project) geeft hem vrij; status `uitgesloten` sluit hem af.
+ */
+export const BATCH_STANDAARD_TOEGELATEN: readonly Gegevens[] = [
+  "publiek",
+  "prive-peter",
+];
+
+/** Een verzoek in een batch. */
+export interface BatchVerzoek {
+  /** `custom_id`: 1-64 tekens uit `[a-zA-Z0-9_-]`, uniek in de batch. De koppeling loopt hierop. */
+  id: string;
+  messages: unknown[];
+  maxTokens?: number;
+  tools?: unknown[];
+  toolChoice?: unknown;
+  responseFormat?: Record<string, unknown>;
+  /** Overschrijft `systemVast` uit de opties, enkel voor dit verzoek. */
+  systemVast?: string;
+  /** Overschrijft `systemVariabel` uit de opties, enkel voor dit verzoek. */
+  systemVariabel?: string;
+}
+
+export interface BatchOpties extends AiOpties {
+  /**
+   * Naam van de omgevingsvariabele met een aparte batchsleutel (een eigen workspace maakt de
+   * batches apart zichtbaar en wisbaar). Standaard `ANTHROPIC_BATCH_API_KEY`; ontbreekt die,
+   * dan de gewone Anthropic-sleutel.
+   */
+  batchSleutelEnv?: string;
+  /** Tijd tussen twee statusvragen, standaard `BATCH_POLL_MS`. */
+  pollMs?: number;
+  /** Zo lang wachten op het einde van de batch, standaard `BATCH_MAX_WACHT_MS`; daarna annuleren. */
+  maxWachtMs?: number;
+  /**
+   * Na het ophalen en de terugval, VOOR de DELETE. Schrijf hier de resultaten weg: gooit dit,
+   * dan blijft de batch bestaan (`wissen: "overgeslagen"`) en kun je hem opnieuw ophalen.
+   */
+  bijResultaten?: (resultaten: BatchResultaat[]) => void | Promise<void>;
+  /** `false`: niet wissen (je wist zelf met `wisBatch` na het wegschrijven). Standaard `true`. */
+  wis?: boolean;
+}
+
+/** Uitkomst per verzoek. */
+export interface BatchResultaat {
+  id: string;
+  /** `batch`: het resultaat van de Batch API; `terugval`: alsnog via `callAi`. */
+  bron: "batch" | "terugval";
+  antwoord?: AiAntwoord;
+  /** Waarom de batch dit verzoek niet leverde (bij `terugval`). */
+  reden?: string;
+  /** Ook de terugval faalde: geen antwoord. */
+  fout?: string;
+}
+
+/** Wat een batch na indienen onthoudt; bewaar het om later op te halen (twee fases). */
+export interface BatchHandle {
+  batchId: string;
+  ids: string[];
+  gegevens: Gegevens;
+  /** Het resultaat moet na het ophalen gewist worden (alles behalve `publiek`). */
+  wisPlicht: boolean;
+}
+
+/** Uitkomst van de beleidspoort. */
+export interface BatchPoort {
+  toegestaan: boolean;
+  reden: string;
+  gegevens: Gegevens;
+  wisPlicht: boolean;
+}
+
+export type WisUitkomst = "gewist" | "mislukt" | "overgeslagen";
+
+/** De Batch API weigerde of faalde. */
+export class AiBatchFout extends Error {
+  readonly status: number;
+  constructor(bericht: string, status: number) {
+    super(bericht);
+    this.name = "AiBatchFout";
+    this.status = status;
+  }
+}
+
+/** De beleidspoort weigerde batch. `callAiBatch` vangt dit zelf op en valt terug op `callAi`. */
+export class AiBatchGeweigerd extends Error {
+  readonly poort: BatchPoort;
+  constructor(poort: BatchPoort) {
+    super(`batch geweigerd: ${poort.reden}`);
+    this.name = "AiBatchGeweigerd";
+    this.poort = poort;
+  }
+}
+
+/** De sleutel voor batch: de aparte (indien ingesteld) of de gewone Anthropic-sleutel. Nooit loggen. */
+function batchSleutel(opties: BatchOpties): string | undefined {
+  return leesEnv(opties.batchSleutelEnv ?? BATCH_SLEUTEL_ENV) ||
+    leesSleutel("anthropic", opties);
+}
+
+/**
+ * De beleidspoort voor batch. Batch is niet ZDR-eligible: de API bewaart invoer en uitvoer 29 dagen
+ * (opvraagbaar met de sleutel) tot een DELETE ze wist. Daarom:
+ *
+ * 1. Het AI-beleid moet Anthropic toelaten voor deze aanroep (toelating, projectverbod, witte lijst,
+ *    verwerkerscontext, toestemming): dezelfde regels als `callAi`.
+ * 2. Per soort gegevens: `publiek` en `prive-peter` mogen standaard (met DELETE-plicht);
+ *    `persoon` en `gezondheid` standaard niet. Een toelating met provider `anthropic-batch` in het
+ *    beleid beslist per soort gegevens (en per project) anders, in beide richtingen.
+ * 3. Zonder project (niet onder beleid) telt enkel een expliciete `gegevens`; zonder die: geweigerd.
+ * 4. Er moet een sleutel zijn.
+ */
+export async function batchToegestaan(
+  opties: BatchOpties,
+): Promise<BatchPoort> {
+  const weiger = (
+    reden: string,
+    gegevens: Gegevens = opties.gegevens ?? "persoon",
+  ): BatchPoort => ({ toegestaan: false, reden, gegevens, wisPlicht: true });
+  const project = aiProject(opties);
+  let gegevens: Gegevens | undefined = opties.gegevens;
+  let beleid: AiBeleid | undefined;
+  if (project) {
+    try {
+      const { uitslag } = await kiesAiVolgorde("tekst", {
+        label: opties.label,
+        volgorde: ["anthropic"],
+        pakket: ["anthropic"],
+        project,
+        gegevens: opties.gegevens,
+        context: opties.context,
+        vast: opties.vast,
+        toestemming: opties.toestemming,
+        // De sleutel toetsen we hieronder zelf (er kan een aparte batchsleutel zijn).
+        heeftSleutel: (p) => p === "anthropic" ? true : undefined,
+      });
+      gegevens = uitslag?.gegevens ?? gegevens;
+      if (!uitslag?.volgorde.includes("anthropic")) {
+        return weiger("het AI-beleid laat Anthropic niet toe", gegevens);
+      }
+    } catch (e) {
+      if (e instanceof AiBeleidFout) {
+        return weiger(`het AI-beleid laat Anthropic niet toe: ${e.message}`);
+      }
+      throw e;
+    }
+    beleid = (await huidigAiBeleid(project)).beleid;
+  }
+  if (!gegevens) {
+    return weiger(
+      "geen project en geen `gegevens`: batch vraagt een expliciet label",
+    );
+  }
+  const wisPlicht = gegevens !== "publiek";
+  const eigen = beleid
+    ? geldendeToelating(beleid, BATCH_BELEIDSNAAM, gegevens, project)
+    : undefined;
+  if (eigen?.regel) {
+    if (eigen.status === "uitgesloten") {
+      return {
+        toegestaan: false,
+        reden:
+          `het AI-beleid sluit batch uit voor "${gegevens}" (${eigen.regel.reden})`,
+        gegevens,
+        wisPlicht,
+      };
+    }
+  } else if (!BATCH_STANDAARD_TOEGELATEN.includes(gegevens)) {
+    return weiger(
+      `batch mag standaard niet voor "${gegevens}" (geef vrij met een toelating "${BATCH_BELEIDSNAAM}" in het beleid)`,
+      gegevens,
+    );
+  }
+  if (!batchSleutel(opties)) {
+    return weiger("geen Anthropic-sleutel voor batch", gegevens);
+  }
+  return {
+    toegestaan: true,
+    reden: eigen?.regel ? "toegelaten door het beleid" : "standaard toegelaten",
+    gegevens,
+    wisPlicht,
+  };
+}
+
+const BATCH_ID = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function batchHeaders(sleutel: string): Record<string, string> {
+  return {
+    "x-api-key": sleutel,
+    "anthropic-version": "2023-06-01",
+    "Content-Type": "application/json",
+  };
+}
+
+async function batchVraag(
+  url: string,
+  init: RequestInit,
+  opties: BatchOpties,
+  timeoutMs = 60_000,
+): Promise<Response> {
+  return await fetch(url, {
+    ...init,
+    signal: combineerSignalen(opties.timeoutMs ?? timeoutMs, opties.signal),
+  });
+}
+
+/** Bouwt de `params` van één verzoek, met dezelfde regels als `callAi` voor Claude. */
+function batchParams(
+  v: BatchVerzoek,
+  opties: BatchOpties,
+): Record<string, unknown> {
+  return bouwAnthropicBody({
+    model: opties.anthropicModel ?? STANDAARD_MODELLEN.anthropic,
+    messages: v.messages,
+    maxTokens: v.maxTokens ?? opties.maxTokens,
+    tools: v.tools ?? opties.tools,
+    toolChoice: v.toolChoice ?? opties.toolChoice,
+    responseFormat: v.responseFormat ?? opties.responseFormat,
+    // Batches duren vaak langer dan 5 minuten: 1 uur is de aanbevolen TTL.
+    cacheTtl: opties.cacheTtl === undefined ? "1h" : opties.cacheTtl,
+    systemVast: v.systemVast ?? opties.systemVast,
+    systemVariabel: v.systemVariabel ?? opties.systemVariabel,
+    cacheModus: opties.cacheModus,
+  });
+}
+
+/**
+ * Dient een batch in, na de beleidspoort: gooit `AiBatchGeweigerd` als die sluit, `AiBatchFout`
+ * als de API weigert, `RangeError` bij een ongeldige `id` of een lege of te grote batch.
+ */
+export async function indienBatch(
+  verzoeken: BatchVerzoek[],
+  opties: BatchOpties,
+): Promise<BatchHandle> {
+  if (verzoeken.length === 0) throw new RangeError("lege batch");
+  if (verzoeken.length > BATCH_MAX_VERZOEKEN) {
+    throw new RangeError(
+      `een batch bevat hoogstens ${BATCH_MAX_VERZOEKEN} verzoeken`,
+    );
+  }
+  const gezien = new Set<string>();
+  for (const v of verzoeken) {
+    if (!BATCH_ID.test(v.id)) {
+      throw new RangeError(
+        `ongeldige id "${v.id}" (1-64 tekens uit a-z, A-Z, 0-9, _ en -)`,
+      );
+    }
+    if (gezien.has(v.id)) throw new RangeError(`dubbele id "${v.id}"`);
+    gezien.add(v.id);
+  }
+  const poort = await batchToegestaan(opties);
+  if (!poort.toegestaan) throw new AiBatchGeweigerd(poort);
+  const sleutel = batchSleutel(opties)!;
+  const r = await batchVraag(
+    BATCH_URL,
+    {
+      method: "POST",
+      headers: batchHeaders(sleutel),
+      body: JSON.stringify({
+        requests: verzoeken.map((v) => ({
+          custom_id: v.id,
+          params: batchParams(v, opties),
+        })),
+      }),
+    },
+    opties,
+    120_000,
+  );
+  if (!r.ok) {
+    const detail = (await r.text().catch(() => "")).slice(0, 200);
+    throw new AiBatchFout(
+      `batch indienen gaf ${r.status} ${detail}`.trim(),
+      r.status,
+    );
+  }
+  const data = await r.json().catch(() => ({}));
+  const batchId = String(data?.id ?? "");
+  if (!batchId) throw new AiBatchFout("batch indienen gaf geen id", r.status);
+  console.warn(
+    `[ai:${opties.label}] batch ${batchId} ingediend (${verzoeken.length} verzoeken, ${poort.gegevens})`,
+  );
+  return {
+    batchId,
+    ids: verzoeken.map((v) => v.id),
+    gegevens: poort.gegevens,
+    wisPlicht: poort.wisPlicht,
+  };
+}
+
+/** Status van een batch: `in_progress`, `canceling` of `ended`, met de tellers. */
+export async function batchStatus(
+  batchId: string,
+  opties: BatchOpties,
+): Promise<
+  { status: string; resultsUrl?: string; telling?: Record<string, number> }
+> {
+  const sleutel = batchSleutel(opties);
+  if (!sleutel) throw new AiBatchFout("geen Anthropic-sleutel voor batch", 0);
+  const r = await batchVraag(`${BATCH_URL}/${encodeURIComponent(batchId)}`, {
+    method: "GET",
+    headers: batchHeaders(sleutel),
+  }, opties);
+  if (!r.ok) {
+    await r.body?.cancel().catch(() => {});
+    throw new AiBatchFout(`batch ophalen gaf ${r.status}`, r.status);
+  }
+  const d = await r.json();
+  return {
+    status: String(d?.processing_status ?? ""),
+    resultsUrl: typeof d?.results_url === "string" ? d.results_url : undefined,
+    telling: d?.request_counts,
+  };
+}
+
+/** Annuleert een lopende batch. Daarna loopt hij via `canceling` naar `ended`. */
+export async function annuleerBatch(
+  batchId: string,
+  opties: BatchOpties,
+): Promise<void> {
+  const sleutel = batchSleutel(opties);
+  if (!sleutel) throw new AiBatchFout("geen Anthropic-sleutel voor batch", 0);
+  const r = await batchVraag(
+    `${BATCH_URL}/${encodeURIComponent(batchId)}/cancel`,
+    { method: "POST", headers: batchHeaders(sleutel) },
+    opties,
+  );
+  await r.body?.cancel().catch(() => {});
+  if (!r.ok && r.status !== 404) {
+    throw new AiBatchFout(`batch annuleren gaf ${r.status}`, r.status);
+  }
+}
+
+/** Batches waarvan de DELETE mislukte: `wisOpenBatches` probeert ze opnieuw. */
+const wisWachtrij = new Map<string, { sleutel: string; sinds: number }>();
+
+/** Wat nog gewist moet worden (voor tests en diagnose). Geen sleutels. */
+export function batchWisWachtrij(): string[] {
+  return [...wisWachtrij.keys()];
+}
+
+/** Leegt de wiswachtrij (tests). */
+export function wisBatchWachtrijLeeg(): void {
+  wisWachtrij.clear();
+}
+
+function slaap(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
+}
+
+/**
+ * Wist een batch bij Anthropic (`DELETE /v1/messages/batches/{id}`), enkel nadat hij `ended` is.
+ * Een lopende batch wordt eerst geannuleerd en afgewacht (hoogstens `wachtMs`, standaard 60 s).
+ * Een 404 telt als gewist. Mislukt het, dan komt de batch in de wiswachtrij (`wisOpenBatches`) en
+ * volgt er een waarschuwing zonder sleutel. Gooit nooit.
+ */
+export async function wisBatch(
+  batchId: string,
+  opties: BatchOpties,
+  wachtMs = 60_000,
+): Promise<"gewist" | "mislukt"> {
+  const sleutel = batchSleutel(opties);
+  if (!sleutel) {
+    console.warn(
+      `[ai:${opties.label}] batch ${batchId} niet gewist: geen sleutel`,
+    );
+    return "mislukt";
+  }
+  try {
+    let st = await batchStatus(batchId, opties).catch((e) => {
+      if (e instanceof AiBatchFout && e.status === 404) return undefined;
+      throw e;
+    });
+    if (!st) {
+      wisWachtrij.delete(batchId);
+      return "gewist";
+    }
+    if (st.status !== "ended") {
+      if (st.status === "in_progress") await annuleerBatch(batchId, opties);
+      const eind = Date.now() + wachtMs;
+      while (st.status !== "ended" && Date.now() < eind) {
+        await slaap(Math.min(Math.max(opties.pollMs ?? 2000, 1), 5000));
+        st = await batchStatus(batchId, opties);
+      }
+      if (st.status !== "ended") {
+        throw new AiBatchFout(`batch is nog niet ended (${st.status})`, 0);
+      }
+    }
+    const r = await batchVraag(`${BATCH_URL}/${encodeURIComponent(batchId)}`, {
+      method: "DELETE",
+      headers: batchHeaders(sleutel),
+    }, opties);
+    await r.body?.cancel().catch(() => {});
+    if (!r.ok && r.status !== 404) {
+      throw new AiBatchFout(`batch wissen gaf ${r.status}`, r.status);
+    }
+    wisWachtrij.delete(batchId);
+    return "gewist";
+  } catch (e) {
+    wisWachtrij.set(batchId, { sleutel, sinds: Date.now() });
+    console.warn(
+      `[ai:${opties.label}] batch ${batchId} NIET gewist, later opnieuw: ${
+        foutTekst(e)
+      }`,
+    );
+    return "mislukt";
+  }
+}
+
+/**
+ * Probeert alle batches in de wiswachtrij opnieuw te wissen. Roep dit af en toe aan (bv. bij het
+ * begin van elke run); `callAiBatch` doet het zelf voor het indient. Gooit nooit.
+ */
+export async function wisOpenBatches(
+  opties: BatchOpties,
+): Promise<{ gewist: number; mislukt: number }> {
+  let gewist = 0, mislukt = 0;
+  for (const [id, info] of [...wisWachtrij]) {
+    const uit = await wisBatch(id, {
+      ...opties,
+      // De sleutel van toen, ook als die intussen veranderde.
+      sleutels: { ...opties.sleutels, anthropic: info.sleutel },
+      batchSleutelEnv: "__niet_ingesteld__",
+    }, 0);
+    if (uit === "gewist") gewist++;
+    else mislukt++;
+  }
+  return { gewist, mislukt };
+}
+
+/** Leest de resultaatregels (JSONL) van een afgelopen batch, gekoppeld op `custom_id`. */
+async function leesBatchResultaten(
+  resultsUrl: string,
+  opties: BatchOpties,
+): Promise<Map<string, Record<string, unknown>>> {
+  const sleutel = batchSleutel(opties)!;
+  const r = await batchVraag(
+    resultsUrl,
+    {
+      method: "GET",
+      headers: batchHeaders(sleutel),
+    },
+    opties,
+    300_000,
+  );
+  if (!r.ok) {
+    await r.body?.cancel().catch(() => {});
+    throw new AiBatchFout(`batchresultaten gaf ${r.status}`, r.status);
+  }
+  const uit = new Map<string, Record<string, unknown>>();
+  for (const lijn of (await r.text()).split("\n")) {
+    if (!lijn.trim()) continue;
+    try {
+      const o = JSON.parse(lijn);
+      if (o && typeof o.custom_id === "string") uit.set(o.custom_id, o);
+    } catch {
+      // een kapotte regel: dat verzoek valt straks terug op callAi
+    }
+  }
+  return uit;
+}
+
+/** Hoeveel terugvallen tegelijk lopen. */
+const BATCH_TERUGVAL_PARALLEL = 3;
+
+/**
+ * Haalt de resultaten van een afgelopen batch op en koppelt ze op `custom_id` aan `verzoeken`.
+ * Elk verzoek dat niet `succeeded` is, of waarvan het antwoord niet bruikbaar is (`refusal`,
+ * afgekapt, leeg, afgekeurd door `aanvaard`), gaat alsnog door de gewone `callAi`-keten.
+ * Daarna `bijResultaten`, dan de DELETE (tenzij `wis: false`). Verbruik gaat met het batchtarief
+ * naar de teller. Is de batch nog niet `ended`: `{ klaar: false, status }`.
+ */
+export async function ophalenBatch(
+  handle: BatchHandle,
+  verzoeken: BatchVerzoek[],
+  opties: BatchOpties,
+): Promise<
+  | { klaar: false; status: string }
+  | { klaar: true; resultaten: BatchResultaat[]; wissen: WisUitkomst }
+> {
+  const st = await batchStatus(handle.batchId, opties);
+  if (st.status !== "ended") return { klaar: false, status: st.status };
+  const ruw = st.resultsUrl
+    ? await leesBatchResultaten(st.resultsUrl, opties)
+    : new Map<string, Record<string, unknown>>();
+  const model = opties.anthropicModel ?? STANDAARD_MODELLEN.anthropic;
+  const type: AiType = opties.type ??
+    (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
+  const project = aiProject(opties);
+  const resultaten = new Map<string, BatchResultaat>();
+  const terugvallen: { v: BatchVerzoek; reden: string }[] = [];
+  const kosten: { usd: number; usage?: AiVerbruik }[] = [];
+
+  for (const v of verzoeken) {
+    const lijn = ruw.get(v.id) as
+      | {
+        result?: {
+          type?: string;
+          message?: Record<string, unknown>;
+          error?: unknown;
+        };
+      }
+      | undefined;
+    const res = lijn?.result;
+    if (!res) {
+      terugvallen.push({ v, reden: "geen resultaat in de batch" });
+      continue;
+    }
+    if (res.type !== "succeeded" || !res.message) {
+      const detail = res.type === "errored"
+        ? ` ${JSON.stringify(res.error ?? "").slice(0, 160)}`
+        : "";
+      terugvallen.push({ v, reden: `batch: ${res.type}${detail}` });
+      continue;
+    }
+    const m = leesAnthropicAntwoord(res.message);
+    const gebruikt = String(res.message.model ?? model);
+    // Een geslaagd verzoek kost geld, ook als we het antwoord afkeuren.
+    kosten.push({
+      usd: kostVan(gebruikt, m.usage, true),
+      usage: m.usage,
+    });
+    const basis: AiAntwoord = {
+      content: m.content,
+      provider: "anthropic",
+      model: gebruikt,
+      finishReason: m.finishReason,
+      usage: m.usage,
+      type,
+      gegevens: handle.gegevens,
+      terugval: false,
+    };
+    if (m.toolCalls && m.toolCalls.length > 0) {
+      resultaten.set(v.id, {
+        id: v.id,
+        bron: "batch",
+        antwoord: {
+          ...basis,
+          toolCall: m.toolCalls[0],
+          toolCalls: m.toolCalls,
+        },
+      });
+    } else if (!m.content) {
+      terugvallen.push({
+        v,
+        reden: `batch: lege inhoud (finish_reason=${m.finishReason})`,
+      });
+    } else if (m.finishReason === "length") {
+      terugvallen.push({ v, reden: "batch: afgekapt op max_tokens" });
+    } else if (opties.aanvaard && !opties.aanvaard(m.content, "anthropic")) {
+      terugvallen.push({ v, reden: "batch: antwoord afgekeurd" });
+    } else {
+      resultaten.set(v.id, { id: v.id, bron: "batch", antwoord: basis });
+    }
+  }
+
+  await batchTerugval(terugvallen, resultaten, opties);
+  const uitkomst = verzoeken.map((v) => resultaten.get(v.id)!);
+
+  let hookGelukt = true;
+  try {
+    await opties.bijResultaten?.(uitkomst);
+  } catch (e) {
+    hookGelukt = false;
+    console.warn(
+      `[ai:${opties.label}] bijResultaten faalde, batch ${handle.batchId} blijft staan: ${
+        foutTekst(e)
+      }`,
+    );
+  }
+  let wissen: WisUitkomst = "overgeslagen";
+  if (hookGelukt && opties.wis !== false) {
+    wissen = await wisBatch(handle.batchId, opties);
+  }
+
+  // Teller: het halve tarief, de cache-tokens en (op de eerste regel) de DELETE-stand.
+  if (project) {
+    const label = opties.gegevens !== undefined;
+    const stand = wissen === "overgeslagen" ? undefined : wissen;
+    if (kosten.length === 0) {
+      meldAiVerbruik({
+        project,
+        provider: "anthropic",
+        type,
+        fout: true,
+        batch: true,
+        batchWissen: stand,
+        label,
+      });
+    }
+    kosten.forEach((k, i) =>
+      meldAiVerbruik({
+        project,
+        provider: "anthropic",
+        type,
+        usd: k.usd,
+        label,
+        cache: cacheTokens(k.usage),
+        batch: true,
+        batchWissen: i === 0 ? stand : undefined,
+      })
+    );
+  }
+  return { klaar: true, resultaten: uitkomst, wissen };
+}
+
+/** Laat de verzoeken die de batch niet leverde door `callAi` lopen (zelfde beleid en opties). */
+async function batchTerugval(
+  lijst: { v: BatchVerzoek; reden: string }[],
+  resultaten: Map<string, BatchResultaat>,
+  opties: BatchOpties,
+): Promise<void> {
+  const {
+    bijResultaten: _b,
+    pollMs: _p,
+    maxWachtMs: _m,
+    batchSleutelEnv: _s,
+    wis: _w,
+    ...gewoon
+  } = opties;
+  let volgende = 0;
+  const werker = async () => {
+    while (volgende < lijst.length) {
+      const { v, reden } = lijst[volgende++];
+      try {
+        const antwoord = await callAi(v.messages, {
+          ...gewoon,
+          maxTokens: v.maxTokens ?? opties.maxTokens,
+          tools: v.tools ?? opties.tools,
+          toolChoice: v.toolChoice ?? opties.toolChoice,
+          responseFormat: v.responseFormat ?? opties.responseFormat,
+          systemVast: v.systemVast ?? opties.systemVast,
+          systemVariabel: v.systemVariabel ?? opties.systemVariabel,
+        });
+        resultaten.set(v.id, { id: v.id, bron: "terugval", antwoord, reden });
+      } catch (e) {
+        resultaten.set(v.id, {
+          id: v.id,
+          bron: "terugval",
+          reden,
+          fout: foutTekst(e),
+        });
+      }
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(BATCH_TERUGVAL_PARALLEL, lijst.length) },
+      werker,
+    ),
+  );
+}
+
+/**
+ * Batch in één aanroep: poort, indienen, wachten, ophalen, terugval, DELETE. Geeft per verzoek een
+ * `BatchResultaat` in de volgorde van `verzoeken`; gooit niet als de batch of de poort faalt, maar
+ * laat dan elk verzoek door `callAi` lopen (`bron: "terugval"`, met de reden). Een ongeldige
+ * invoer (lege of te grote batch, slechte `id`) gooit wel een `RangeError`.
+ *
+ * Voor een edge function met een looptijdlimiet: gebruik `indienBatch` en later `ophalenBatch`.
+ */
+export async function callAiBatch(
+  verzoeken: BatchVerzoek[],
+  opties: BatchOpties,
+): Promise<BatchResultaat[]> {
+  if (verzoeken.length === 0) return [];
+  // Eerst opruimen wat een vorige run niet kon wissen.
+  if (wisWachtrij.size > 0) await wisOpenBatches(opties);
+
+  const allesTerug = async (reden: string) => {
+    console.warn(`[ai:${opties.label}] geen batch, alles via callAi: ${reden}`);
+    const resultaten = new Map<string, BatchResultaat>();
+    await batchTerugval(
+      verzoeken.map((v) => ({ v, reden })),
+      resultaten,
+      opties,
+    );
+    return verzoeken.map((v) => resultaten.get(v.id)!);
+  };
+
+  let handle: BatchHandle;
+  try {
+    handle = await indienBatch(verzoeken, opties);
+  } catch (e) {
+    if (e instanceof RangeError) throw e;
+    return await allesTerug(
+      e instanceof AiBatchGeweigerd
+        ? e.message
+        : `indienen faalde: ${foutTekst(e)}`,
+    );
+  }
+
+  const pollMs = opties.pollMs ?? BATCH_POLL_MS;
+  const eind = Date.now() + (opties.maxWachtMs ?? BATCH_MAX_WACHT_MS);
+  let geannuleerd = false;
+  try {
+    while (true) {
+      const r = await ophalenBatch(handle, verzoeken, opties);
+      if (r.klaar) return r.resultaten;
+      if (opties.signal?.aborted) {
+        throw new DOMException("afgebroken", "AbortError");
+      }
+      if (Date.now() >= eind) {
+        if (geannuleerd) break; // al geannuleerd en nog niet ended: opgeven
+        geannuleerd = true;
+        await annuleerBatch(handle.batchId, opties);
+      }
+      await slaap(pollMs);
+    }
+  } catch (e) {
+    console.warn(
+      `[ai:${opties.label}] batch ${handle.batchId} ophalen faalde: ${
+        foutTekst(e)
+      }`,
+    );
+  }
+  // Niet af te ronden: de batch alsnog proberen te wissen (komt anders in de wiswachtrij).
+  wisWachtrij.set(handle.batchId, {
+    sleutel: batchSleutel(opties)!,
+    sinds: Date.now(),
+  });
+  return await allesTerug(`batch ${handle.batchId} niet afgerond`);
 }

@@ -421,6 +421,91 @@ bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit 
   "afgebroken" zijn `info`, geen rode fout); `urlZonderGoogleTerug` kuist de URL
   op en laat `next` staan.
 
+## Nieuw in 0.34.0 (ai): cache-meting, systeemdelen, auto-caching en batch
+
+> Status: gebouwd op de branch `batch-caching`, nog niet gepubliceerd.
+
+**Meting.** De dagteller (`VerbruikRegel`) draagt sinds 0.34.0 optionele velden
+`cache_lees`, `cache_schrijf_5m`, `cache_schrijf_1u`, `batch_aanroepen`,
+`batch_gewist` en `batch_wis_mislukt`; ze staan er alleen als ze groter zijn dan
+0. De Worker slaat ze op in de tabel `verbruik_extra` (`beleid/verbruik.sql`
+eerst uitrollen, dan de Worker) en toont ze op `GET /verbruik-extra`. Hitrate =
+`cache_lees / (cache_lees + cache_schrijf_5m + cache_schrijf_1u + gewone input)`.
+`schatUsd(model, usage, { batch: true })` rekent het halve tarief; een
+cache-lees kost 0,05x bij Sonnet 5.5 en Opus 5.5 (voorheen overal 0,1x) en 0,1x
+bij de rest. `cacheTokens(usage)` splitst de tokens.
+
+**Systeemdelen.** `systemVast` krijgt het cache-breakpoint; `systemVariabel` en
+system-berichten in `messages` komen erachter en maken de cache niet ongeldig.
+Andere providers krijgen beide samengevoegd als één system-bericht. Zonder
+`systemVast` is het gedrag als voorheen.
+
+**Auto-caching.** `cacheModus: "auto"` zet een top-level `cache_control`: het
+breakpoint schuift mee met het gesprek (multi-turn, tool-lussen). Dezelfde TTL
+als `cacheTtl`; het gebruikt één van de vier breakpoint-plaatsen.
+
+**Batch.** `callAiBatch(verzoeken, opties)` dient de verzoeken in bij
+Anthropic's Message Batches API (halve prijs, standaard 1-uurs cache), wacht,
+haalt op en koppelt op `custom_id`. Per verzoek dat niet `succeeded` is
+(`errored`, `expired`, `canceled`), dat niet bruikbaar is (`refusal`, afgekapt,
+leeg, afgekeurd door `aanvaard`) of ontbreekt, valt het terug op `callAi`. Voor
+een edge function met een looptijdlimiet: `indienBatch`, later `ophalenBatch`.
+
+```ts
+const uit = await callAiBatch(
+  items.map((x) => ({
+    id: `item-${x.id}`,
+    messages: [{ role: "user", content: x.tekst }],
+  })),
+  {
+    label: "scan",
+    project: "vacatures",
+    gegevens: "prive-peter",
+    systemVast: PROFIEL,
+    maxTokens: 800,
+  },
+);
+for (const r of uit) r.antwoord?.content; // r.bron: "batch" of "terugval"
+```
+
+_Beleidspoort_ (`batchToegestaan`): batch is niet ZDR-eligible (29 dagen
+bewaard, opvraagbaar met de sleutel tot een DELETE ze wist).
+
+| Soort gegevens          | Standaard                          | Opmerking             |
+| ----------------------- | ---------------------------------- | --------------------- |
+| `publiek`               | toegestaan                         | DELETE na het ophalen |
+| `prive-peter`           | toegestaan                         | DELETE-plicht         |
+| `persoon`, `gezondheid` | geweigerd (terugval naar `callAi`) | vrij te geven         |
+
+Het gewone AI-beleid voor Anthropic blijft eerst gelden. Een toelating met
+provider `anthropic-batch` in `toelatingen` beslist per soort gegevens (en per
+project) anders, in beide richtingen: status `onderbouwd` of `testfase` geeft
+vrij, `uitgesloten` sluit af. Eén beleidswijziging volstaat dus om `persoon`
+vrij te geven. Zonder project telt enkel een expliciete `gegevens`.
+
+_DELETE-plicht._ Na het ophalen (en `bijResultaten`, waar je wegschrijft) volgt
+`DELETE /v1/messages/batches/{id}`, enkel na `ended`; een lopende batch wordt
+eerst geannuleerd en afgewacht. Een 404 telt als gewist. Mislukt het, dan staat
+de batch in de wiswachtrij (`batchWisWachtrij`, `wisOpenBatches`; `callAiBatch`
+probeert ze bij de volgende run opnieuw) en volgt er een waarschuwing zonder
+sleutel. Gooit `bijResultaten`, dan blijft de batch staan. `wis: false` laat het
+wissen aan jou (`wisBatch`). De wiswachtrij leeft in het proces: een edge
+function die na `ophalenBatch` `wissen: "mislukt"` krijgt, bewaart het batch-id
+en roept later `wisBatch` aan.
+
+_Sleutel._ Optioneel een aparte sleutel (eigen workspace):
+`ANTHROPIC_BATCH_API_KEY`, of een andere naam via `batchSleutelEnv`. Ontbreekt
+die, dan de gewone `ANTHROPIC_API_KEY`. Nooit in een log.
+
+Grenzen: hoogstens 100.000 verzoeken per batch; `id` is 1-64 tekens uit
+`[a-zA-Z0-9_-]`; geen `stream`, `speed` of `max_tokens: 0`. Standaard 25 uur
+wachten (`maxWachtMs`), daarna annuleren en terugvallen.
+
+**Python (py-1.4.0).** `holie_ai.call_ai` kent `cache_ttl` (standaard `"5m"`),
+`system_vast`, `system_variabel` en `cache_modus="auto"`, met dezelfde
+semantiek; het cache-verkeer gaat mee naar de teller. Batch bestaat nog niet in
+Python.
+
 ## Nieuw in 0.33.0 (ai): storingen in de verbruiksmelding
 
 `callAi` verzamelt per aanroep de providers die faalden (status >= 400 of 0 bij
