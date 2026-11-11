@@ -126,13 +126,104 @@ def test_body_vorm():
                      http=http)
     h, b = gezien[holie_ai.ANTHROPIC_URL]
     assert h["x-api-key"] == ENV["ANTHROPIC_API_KEY"] and h["anthropic-version"] == "2023-06-01"
-    assert b["system"] == "sys" and "temperature" not in b and b["model"] == "claude-haiku-5-5"
+    assert b["system"] == [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+    assert "temperature" not in b and b["model"] == "claude-haiku-5-5"
     holie_ai.call_ai(MSG, project="domus", label="t", gegevens="prive-peter", system="sys",
                      temperature=0.3, volgorde=["deepseek"], env=ENV, beleid=hab.NOODBELEID,
                      http=http)
     h, b = gezien[holie_ai.DEEPSEEK_URL]
     assert b["thinking"] == {"type": "disabled"} and b["temperature"] == 0.3
     assert b["messages"][0] == {"role": "system", "content": "sys"}
+
+
+def _body(**kw):
+    gezien = {}
+
+    def http(url, headers, body, timeout):
+        gezien[url] = json.loads(body)
+        return (200, OK_ANT) if "anthropic" in url else (200, OK_DS)
+    holie_ai.call_ai(MSG, project="domus", label="t", gegevens="prive-peter",
+                     env=ENV, beleid=hab.NOODBELEID, http=http, **kw)
+    return gezien
+
+
+def test_cache_vast_en_variabel_deel():
+    b = _body(volgorde=["anthropic"], system_vast="VAST", system_variabel="VAR",
+              system="uit-param", cache_ttl="1h")[holie_ai.ANTHROPIC_URL]
+    assert b["system"] == [
+        {"type": "text", "text": "VAST", "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        {"type": "text", "text": "uit-param\n\nVAR"}]
+    assert "cache_control" not in b
+
+
+def test_cache_zonder_vast_deel_en_zonder_cache():
+    b = _body(volgorde=["anthropic"], system="een")[holie_ai.ANTHROPIC_URL]
+    assert b["system"][0]["cache_control"] == {"type": "ephemeral"}
+    b = _body(volgorde=["anthropic"], system_vast="A", system_variabel="B", cache_ttl=False,
+              cache_modus="auto")[holie_ai.ANTHROPIC_URL]
+    assert b["system"] == "A\n\nB" and "cache_control" not in b
+    b = _body(volgorde=["anthropic"])[holie_ai.ANTHROPIC_URL]
+    assert "system" not in b
+
+
+def test_cache_modus_auto_zet_top_level_cache_control():
+    b = _body(volgorde=["anthropic"], system_vast="A", cache_modus="auto")[holie_ai.ANTHROPIC_URL]
+    assert b["cache_control"] == {"type": "ephemeral"}
+    b = _body(volgorde=["anthropic"], system_vast="A", cache_modus="auto",
+              cache_ttl="1h")[holie_ai.ANTHROPIC_URL]
+    assert b["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert b["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+
+def test_andere_providers_krijgen_een_samengevoegd_system_bericht():
+    b = _body(volgorde=["deepseek"], system_vast="VAST", system_variabel="VAR")[holie_ai.DEEPSEEK_URL]
+    assert b["messages"][0] == {"role": "system", "content": "VAST\n\nVAR"}
+    assert "cache_control" not in json.dumps(b)
+
+
+def test_cache_tokens_gaan_naar_de_teller():
+    usage = {"input_tokens": 3, "output_tokens": 1, "cache_read_input_tokens": 400,
+             "cache_creation_input_tokens": 600,
+             "cache_creation": {"ephemeral_1h_input_tokens": 100}}
+    ok = json.dumps({"content": [{"type": "text", "text": "dag"}], "stop_reason": "end_turn",
+                     "usage": usage})
+    with mock.patch.object(hab, "meld_verbruik") as m:
+        roep(nep((200, ok)))
+    assert m.call_args.kwargs["cache"] == {"lees": 400, "schrijf_5m": 500, "schrijf_1u": 100}
+
+
+def test_schat_usd_lees_en_batch():
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000,
+             "cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000,
+             "cache_creation": {"ephemeral_1h_input_tokens": 1_000_000}}
+    assert abs(hab.schat_usd("claude-sonnet-5-5", usage) - 16.1) < 1e-9
+    assert abs(hab.schat_usd("claude-haiku-5-5", usage) - 0.81) < 1e-9
+    assert abs(hab.schat_usd("claude-sonnet-5-5", usage, batch=True) - 8.05) < 1e-9
+    assert abs(hab.schat_usd("claude-opus-5-5", {"cache_read_input_tokens": 1_000_000}) - 0.2) < 1e-9
+
+
+def test_meld_verbruik_cachevelden_alleen_als_er_iets_is():
+    gezien = []
+
+    class Antwoord:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(verzoek, timeout=None):
+        gezien.append(json.loads(verzoek.data))
+        return Antwoord()
+    with mock.patch.object(hab.urllib.request, "urlopen", urlopen):
+        hab.meld_verbruik("domus", "anthropic", "tekst", 0.1, url="https://nep.test/v",
+                          cache={"lees": 5, "schrijf_5m": 0, "schrijf_1u": 7})
+        hab.meld_verbruik("domus", "anthropic", "tekst", 0.1, url="https://nep.test/v")
+    r1, r2 = gezien[0]["regels"][0], gezien[1]["regels"][0]
+    assert r1["cache_lees"] == 5 and r1["cache_schrijf_1u"] == 7 and "cache_schrijf_5m" not in r1
+    assert not [k for k in r2 if k.startswith("cache_")]
 
 
 def test_samenvoegen():

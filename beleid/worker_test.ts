@@ -9,9 +9,11 @@ type Rij = Record<string, string | number>;
 function nepD1() {
   const rijen = new Map<string, Rij>();
   const storingen = new Map<string, Rij>();
+  const extra = new Map<string, Rij>();
   const db = {
     rijen,
     storingen,
+    extra,
     prepare(sql: string) {
       return {
         sql,
@@ -20,6 +22,14 @@ function nepD1() {
           return { ...this, args };
         },
         all() {
+          if (this.sql.includes("FROM verbruik_extra")) {
+            const [van, tot] = this.args as string[];
+            return Promise.resolve({
+              results: [...extra.values()].filter((r) =>
+                String(r.dag) >= van && String(r.dag) <= tot
+              ),
+            });
+          }
           if (this.sql.includes("FROM storing")) {
             const [dag] = this.args as string[];
             return Promise.resolve({
@@ -36,6 +46,37 @@ function nepD1() {
     },
     batch(stmts: { sql: string; args: unknown[] }[]) {
       for (const s of stmts) {
+        if (s.sql.includes("INTO verbruik_extra")) {
+          const [dag, project, provider, type, ...tellers] = s.args as [
+            string,
+            string,
+            string,
+            string,
+            ...number[],
+          ];
+          const namen = [
+            "cache_lees",
+            "cache_schrijf_5m",
+            "cache_schrijf_1u",
+            "batch_aanroepen",
+            "batch_gewist",
+            "batch_wis_mislukt",
+          ];
+          const k = [dag, project, provider, type].join("|");
+          const rij = extra.get(k) ??
+            {
+              dag,
+              project,
+              provider,
+              type,
+              ...Object.fromEntries(namen.map((n) => [n, 0])),
+            };
+          namen.forEach((n, i) => {
+            rij[n] = Number(rij[n]) + tellers[i];
+          });
+          extra.set(k, rij);
+          continue;
+        }
         if (s.sql.includes("INTO storing")) {
           const [dag, provider, soort, project, aantal, status, tijd] = s
             .args as [string, string, string, string, number, number, string];
@@ -347,4 +388,67 @@ Deno.test("/lezers en /historie vragen de leessleutel, / toont geen padenlijst",
   const wortel = await vraag("/");
   assertEquals(wortel.status, 404);
   assertEquals((await wortel.text()).includes("lezers"), false);
+});
+
+Deno.test("POST /verbruik met cache en batch schrijft in verbruik_extra en telt op", async () => {
+  const e = env();
+  const bij = {
+    cache_lees: 400,
+    cache_schrijf_5m: 100,
+    cache_schrijf_1u: 50,
+    batch_aanroepen: 2,
+    batch_gewist: 1,
+  };
+  assertEquals((await post(e, { regels: [regel({ ...bij })] })).status, 200);
+  assertEquals((await post(e, { regels: [regel({ ...bij })] })).status, 200);
+  assertEquals(e.VERBRUIK.extra.size, 1);
+  const r = [...e.VERBRUIK.extra.values()][0];
+  assertEquals(r.cache_lees, 800);
+  assertEquals(r.cache_schrijf_1u, 100);
+  assertEquals(r.batch_aanroepen, 4);
+  assertEquals(r.batch_gewist, 2);
+  assertEquals(r.batch_wis_mislukt, 0);
+  // een gewone regel raakt de extra tabel niet
+  const e2 = env();
+  assertEquals((await post(e2, { regels: [regel()] })).status, 200);
+  assertEquals(e2.VERBRUIK.extra.size, 0);
+});
+
+Deno.test("POST /verbruik weigert slechte extra tellers", async () => {
+  const e = env();
+  for (
+    const slecht of [
+      { cache_lees: -1 },
+      { cache_lees: 1.5 },
+      { cache_schrijf_5m: "veel" },
+      { batch_aanroepen: 3 }, // meer dan de 2 aanroepen van de regel
+      { batch_wis_mislukt: 9 },
+    ]
+  ) {
+    assertEquals(
+      (await post(e, { regels: [regel(slecht)] })).status,
+      400,
+      JSON.stringify(slecht),
+    );
+  }
+  assertEquals(e.VERBRUIK.extra.size, 0);
+});
+
+Deno.test("GET /verbruik-extra vraagt de leessleutel", async () => {
+  const e = env();
+  await post(e, { regels: [regel({ cache_lees: 5, batch_aanroepen: 1 })] });
+  const vraag = (sleutel?: string) =>
+    worker.fetch(
+      new Request("https://beleid.holie.be/verbruik-extra", {
+        headers: sleutel ? { authorization: `Bearer ${sleutel}` } : {},
+      }),
+      e,
+      { waitUntil() {} },
+    );
+  assertEquals((await vraag()).status, 401);
+  const ok = await vraag("lees-geheim");
+  assertEquals(ok.status, 200);
+  const d = await ok.json();
+  assertEquals(d.regels.length, 1);
+  assertEquals(d.regels[0].cache_lees, 5);
 });

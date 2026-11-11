@@ -31,3 +31,24 @@ CREATE TABLE IF NOT EXISTS storing (
   laatste TEXT NOT NULL,
   PRIMARY KEY (dag, provider, soort, project)
 );
+
+-- Cache en batch (0.34.0): tokens uit en naar de cache (5 minuten en 1 uur) en batchtellers, per
+-- dag, project, provider en type. Aparte tabel zodat `verbruik` ongewijzigd blijft. Eerst uitrollen
+-- (npx wrangler@4 d1 execute holie-ai-verbruik --remote --file verbruik.sql), dan pas de Worker
+-- bijwerken: een regel met extra tellers faalt zolang deze tabel ontbreekt.
+-- batch_aanroepen: verzoeken via de Batch API (tegen het halve tarief, al in `verbruik.usd`);
+-- batch_gewist en batch_wis_mislukt: batches waarvan de DELETE na het ophalen lukte of mislukte.
+CREATE TABLE IF NOT EXISTS verbruik_extra (
+  dag TEXT NOT NULL,
+  project TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  type TEXT NOT NULL,
+  cache_lees INTEGER NOT NULL DEFAULT 0,
+  cache_schrijf_5m INTEGER NOT NULL DEFAULT 0,
+  cache_schrijf_1u INTEGER NOT NULL DEFAULT 0,
+  batch_aanroepen INTEGER NOT NULL DEFAULT 0,
+  batch_gewist INTEGER NOT NULL DEFAULT 0,
+  batch_wis_mislukt INTEGER NOT NULL DEFAULT 0,
+  bijgewerkt TEXT NOT NULL,
+  PRIMARY KEY (dag, project, provider, type)
+);

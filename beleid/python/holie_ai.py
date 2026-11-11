@@ -13,6 +13,9 @@ De volgorde komt uit het AI-beleid (`kies_providers`, standaard de basisvolgorde
 een provider zonder sleutel of die deze client niet kent valt weg, DeepSeek en Meta blijven eruit
 waar het beleid dat voor de gegevens eist (bv. "persoon"). Meta (Muse) doet enkel type "tekst"
 (py-1.3.0, zoals `callAi` sinds 0.33.0).
+Prompt caching voor Claude (py-1.4.0, zelfde semantiek als `cacheTtl`, `systemVast`, `systemVariabel`
+en `cacheModus` in `callAi`): `cache_ttl` ("5m" standaard, "1h", of False), `system_vast`,
+`system_variabel` en `cache_modus="auto"`. De cache-tokens gaan mee naar de centrale teller.
 Terugval naar de volgende provider bij: 400/401/402 met "credit" of "balance" in de tekst (tegoed
 op: die provider 10 min overgeslagen), 429, 5xx (ook 529), timeout, netwerkfout en elke andere
 4xx (zonder cache). Verbruik en storingen gaan naar de centrale teller. Nooit een sleutel in
@@ -119,17 +122,40 @@ def _json(tekst: str) -> dict:
         return {}
 
 
-def _bouw_anthropic(model: str, messages: list[dict], system: str | None, max_tokens: int):
-    systemen = [system] if system else []
+def _bouw_anthropic(model: str, messages: list[dict], system: str | None, max_tokens: int,
+                    cache_ttl: str | bool = "5m", system_vast: str | None = None,
+                    system_variabel: str | None = None, cache_modus: str = "vast"):
+    """Zelfde semantiek als `bouwAnthropicBody` in @holie/tools. Het vaste deel van het system
+    krijgt een cache-breakpoint (standaard 5 minuten; "1h", of False voor geen cache). Zonder
+    `system_vast` is alles uit `system` en de system-berichten het vaste deel; mét `system_vast`
+    komen die erachter, samen met `system_variabel`, zonder breakpoint. `cache_modus="auto"` zet
+    daarbovenop een top-level cache_control dat met het gesprek meeschuift."""
+    teksten = ([system] if system else [])
     berichten = []
     for m in messages:
         if m.get("role") == "system":
-            systemen.append(str(m.get("content") or ""))
+            teksten.append(str(m.get("content") or ""))
         else:
             berichten.append({"role": m["role"], "content": m["content"]})
+    teksten = [t for t in teksten if t]
+    vast = [system_vast] if system_vast else teksten
+    variabel = (teksten if system_vast else []) + ([system_variabel] if system_variabel else [])
     body: dict = {"model": model, "max_tokens": max_tokens, "messages": berichten}
-    if systemen:
-        body["system"] = "\n\n".join(s for s in systemen if s)
+    markering = None
+    if cache_ttl:
+        markering = {"type": "ephemeral", **({"ttl": "1h"} if cache_ttl == "1h" else {})}
+    if vast or variabel:
+        blokken = []
+        if vast:
+            blok = {"type": "text", "text": "\n\n".join(vast)}
+            if markering:
+                blok["cache_control"] = markering
+            blokken.append(blok)
+        if variabel:
+            blokken.append({"type": "text", "text": "\n\n".join(variabel)})
+        body["system"] = blokken if markering else "\n\n".join(b["text"] for b in blokken)
+    if markering and cache_modus == "auto":
+        body["cache_control"] = markering
     # Nooit temperature naar Claude: nieuwere modellen weigeren die.
     return body
 
@@ -166,7 +192,9 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
             max_tokens: int = 2048, temperature: float | None = None, timeout: float = 120,
             anthropic_model: str | None = None, deepseek_model: str | None = None,
             gemini_model: str | None = None, lovable_model: str | None = None,
-            meta_model: str | None = None, env: dict | None = None,
+            meta_model: str | None = None, cache_ttl: str | bool = "5m",
+            system_vast: str | None = None, system_variabel: str | None = None,
+            cache_modus: str = "vast", env: dict | None = None,
             beleid: dict | None = None, http: HttpFn | None = None) -> dict:
     """Eén tekstaanroep met terugval. Geeft {"content","provider","model","usage","terugval",
     "finish_reason"}. Gooit AiOnbeschikbaar als alles faalt, BeleidLeeg als het beleid of de
@@ -184,6 +212,8 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
 
     if beleid is None:
         beleid = beleid_mod.huidig_beleid(project)
+    # Andere providers kennen geen cache: vast en variabel deel samen, vooraan.
+    system_samen = "\n\n".join(t for t in (system, system_vast, system_variabel) if t) or None
     kandidaten = list(volgorde) if volgorde else None  # None = basisvolgorde uit het beleid
     uitslag = beleid_mod.kies_providers(
         beleid, type=type, project=project, gegevens=gegevens, volgorde=kandidaten,
@@ -211,12 +241,14 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
         sleutel = sleutel_van(provider)
         model = modellen[provider]
         if provider == "anthropic":
-            url, body = ANTHROPIC_URL, _bouw_anthropic(model, messages, system, max_tokens)
+            url, body = ANTHROPIC_URL, _bouw_anthropic(
+                model, messages, system, max_tokens, cache_ttl, system_vast, system_variabel,
+                cache_modus)
             headers = {"content-type": "application/json", "x-api-key": sleutel,
                        "anthropic-version": ANTHROPIC_VERSIE}
         else:
             url = URLS[provider]
-            body = _bouw_openai(model, messages, system, max_tokens, temperature,
+            body = _bouw_openai(model, messages, system_samen, max_tokens, temperature,
                                 provider == "deepseek")
             headers = {"content-type": "application/json", "authorization": f"Bearer {sleutel}"}
         headers["user-agent"] = f"holie-ai/{beleid_mod.PAKKET_VERSIE}"
@@ -234,7 +266,8 @@ def call_ai(messages: list[dict], *, project: str, label: str, gegevens: str | N
             if inhoud.strip():
                 beleid_mod.meld_verbruik(
                     project, provider, type, beleid_mod.schat_usd(model, usage),
-                    terugval=i > 0, label=gegevens is not None, storingen=storingen)
+                    terugval=i > 0, label=gegevens is not None, storingen=storingen,
+                    cache=beleid_mod.cache_tokens(usage) if provider == "anthropic" else None)
                 return {"content": inhoud, "provider": provider, "model": model,
                         "usage": usage, "terugval": i > 0, "finish_reason": stop}
             fout = "lege inhoud"  # geen storing: de provider werkt, het antwoord niet

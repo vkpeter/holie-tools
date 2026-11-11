@@ -38,7 +38,7 @@ from typing import Callable, Iterable
 
 BELEID_URL = "https://beleid.holie.be/ai-beleid.json"
 BELEID_PUBLIEKE_SLEUTEL = "Z9tJme2ghnbvQNMQzO5IUM6Ivo20uBqTCa9TWAzOW7o="
-PAKKET_VERSIE = "py-1.3.0"
+PAKKET_VERSIE = "py-1.4.0"
 VERS_S = 5 * 60
 MAX_S = 24 * 60 * 60
 
@@ -426,19 +426,36 @@ TARIEVEN = {
 }
 
 
-def schat_usd(model: str, usage: dict | None) -> float:
-    """Tokens naar dollar; OpenAI-vorm (prompt/completion) of Anthropic-vorm (input/output)."""
+# Cache-lees kost 0,05x het inputtarief bij deze modellen (voetnoot 2 van de prijstabel), de rest 0,1x.
+LEES_005 = {"claude-sonnet-5-5", "claude-opus-5-5"}
+
+
+def cache_tokens(usage: dict | None) -> dict:
+    """De cache-tokens uit een Anthropic-`usage`: gelezen, geschreven met 5 minuten en met 1 uur.
+    Zonder uitsplitsing (`cache_creation`) telt elke schrijf als 5 minuten."""
+    usage = usage or {}
+    lees = max(0, int(usage.get("cache_read_input_tokens", 0) or 0))
+    totaal = max(0, int(usage.get("cache_creation_input_tokens", 0) or 0))
+    een_uur = min(totaal, max(0, int((usage.get("cache_creation") or {})
+                                     .get("ephemeral_1h_input_tokens", 0) or 0)))
+    return {"lees": lees, "schrijf_5m": totaal - een_uur, "schrijf_1u": een_uur}
+
+
+def schat_usd(model: str, usage: dict | None, *, batch: bool = False) -> float:
+    """Tokens naar dollar; OpenAI-vorm (prompt/completion) of Anthropic-vorm (input/output).
+    `batch=True`: het halve tarief van de Batch API (stapelt met de cache)."""
     tarief = TARIEVEN.get(model or "")
     if not tarief or not usage:
         return 0.0
     i = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
     o = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
-    # Prompt caching (Anthropic): lezen 0,1x, schrijven 1,25x (5 min) of 2x (1 uur) het inputtarief.
-    lees = usage.get("cache_read_input_tokens", 0) or 0
-    schrijf = usage.get("cache_creation_input_tokens", 0) or 0
-    schrijf_1u = min(schrijf, (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens", 0) or 0)
-    cache = tarief[0] * (lees * 0.1 + (schrijf - schrijf_1u) * 1.25 + schrijf_1u * 2)
-    return float(i) * tarief[0] + float(o) * tarief[1] + cache
+    # Prompt caching (Anthropic): schrijven 1,25x (5 min) of 2x (1 uur) het inputtarief, lezen 0,1x
+    # (0,05x voor Sonnet 5.5 en Opus 5.5).
+    c = cache_tokens(usage)
+    lees_factor = 0.05 if model in LEES_005 else 0.1
+    cache = tarief[0] * (c["lees"] * lees_factor + c["schrijf_5m"] * 1.25 + c["schrijf_1u"] * 2)
+    totaal = float(i) * tarief[0] + float(o) * tarief[1] + cache
+    return totaal * (0.5 if batch else 1.0)
 
 
 def _brusselse_dag() -> str:
@@ -464,13 +481,14 @@ def samenvoegen_storingen(storingen: list[dict] | None) -> list[dict]:
 
 def meld_verbruik(project: str, provider: str, type_: str = "tekst", usd: float = 0.0, *,
                   terugval: bool = False, label: bool = True, fout: bool = False,
-                  storingen: list[dict] | None = None,
+                  storingen: list[dict] | None = None, cache: dict | None = None,
                   url: str | None = None, timeout: float = 2.0) -> bool:
     """Meldt één aanroep aan de dagteller (POST /verbruik). Gooit nooit; geeft True als de
     Worker het aanvaardde. `label` = de aanroep gaf zelf `gegevens` mee. Uit met
     HOLIE_AI_VERBRUIK_URL=uit of HOLIE_AI_BELEID_URL=uit (tests). `storingen`: de providers die
     in deze aanroep faalden, [{"provider","soort","status"}]; samengevoegd per provider+soort
-    met `aantal`, en weggelaten als de lijst leeg is."""
+    met `aantal`, en weggelaten als de lijst leeg is. `cache` (sinds py-1.4.0): `cache_tokens(usage)`;
+    de velden cache_lees, cache_schrijf_5m en cache_schrijf_1u gaan alleen mee als ze groter zijn dan 0."""
     try:
         adres = url or os.environ.get("HOLIE_AI_VERBRUIK_URL") or VERBRUIK_URL
         if adres == "uit" or (not url and os.environ.get("HOLIE_AI_BELEID_URL") == "uit"):
@@ -484,6 +502,11 @@ def meld_verbruik(project: str, provider: str, type_: str = "tekst", usd: float 
             "aanroepen": 1, "usd": round(bedrag, 6), "terugval": int(bool(terugval)),
             "zonder_label": int(not label), "fouten": int(bool(fout)),
         }
+        for veld, sleutel in (("cache_lees", "lees"), ("cache_schrijf_5m", "schrijf_5m"),
+                              ("cache_schrijf_1u", "schrijf_1u")):
+            n = int((cache or {}).get(sleutel, 0) or 0)
+            if n > 0:
+                regel[veld] = n
         samen = samenvoegen_storingen(storingen)
         if samen:
             regel["storingen"] = samen

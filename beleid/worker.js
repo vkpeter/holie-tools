@@ -13,8 +13,12 @@
  *                                                    Per regel mag een `storingen`-array mee
  *                                                    (>= 0.33.0): [{ provider, soort: "tegoed" | "fout",
  *                                                    status, aantal }], opgeteld in D1-tabel `storing`
+ *                                                    Ook optioneel per regel (>= 0.34.0): cache_lees, cache_schrijf_5m,
+ *                                                    cache_schrijf_1u (tokens), batch_aanroepen, batch_gewist,
+ *                                                    batch_wis_mislukt; opgeteld in D1-tabel `verbruik_extra`
  *   GET  /verbruik?van=&tot=                         de dagteller, enkel met
  *                                                    `Authorization: Bearer <VERBRUIK_LEESSLEUTEL>`
+ *   GET  /verbruik-extra?van=&tot=                   (met dezelfde leessleutel) de extra tellers per dag
  *   GET  /storing?dag=YYYY-MM-DD                     (met dezelfde leessleutel) de storingen van een dag
  *                                                    (standaard vandaag Brussel): { storingen: [...] }
  *
@@ -105,6 +109,16 @@ export const VERBRUIK_MAX_REGELS = 50;
 export const VERBRUIK_MAX_USD_REGEL = 50;
 export const VERBRUIK_MAX_USD_DAG = 500;
 export const VERBRUIK_MAX_AANROEPEN_REGEL = 10000;
+/** Extra tellers (0.34.0): tokens en batches per regel. */
+export const EXTRA_VELDEN = [
+  "cache_lees",
+  "cache_schrijf_5m",
+  "cache_schrijf_1u",
+  "batch_aanroepen",
+  "batch_gewist",
+  "batch_wis_mislukt",
+];
+const EXTRA_MAX = 1e12;
 const TYPES = new Set([
   "tekst",
   "tools",
@@ -155,6 +169,14 @@ export function regelFout(r, nu = Date.now()) {
   for (const veld of ["terugval", "zonder_label", "fouten"]) {
     if (!geheelTussen(r[veld] ?? 0, 0, r.aanroepen)) return veld;
   }
+  for (const veld of EXTRA_VELDEN) {
+    if (r[veld] !== undefined && !geheelTussen(r[veld], 0, EXTRA_MAX)) {
+      return veld;
+    }
+  }
+  for (const veld of ["batch_aanroepen", "batch_gewist", "batch_wis_mislukt"]) {
+    if ((r[veld] ?? 0) > r.aanroepen) return veld;
+  }
   if (r.storingen !== undefined) {
     if (!Array.isArray(r.storingen) || r.storingen.length > 10) {
       return "storingen";
@@ -185,6 +207,19 @@ const UPSERT = `INSERT INTO verbruik
     bijgewerkt = excluded.bijgewerkt
   WHERE verbruik.usd + excluded.usd <= ${VERBRUIK_MAX_USD_DAG}
     AND verbruik.aanroepen + excluded.aanroepen <= 1000000`;
+
+const UPSERT_EXTRA = `INSERT INTO verbruik_extra
+  (dag, project, provider, type, cache_lees, cache_schrijf_5m, cache_schrijf_1u,
+   batch_aanroepen, batch_gewist, batch_wis_mislukt, bijgewerkt)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+  ON CONFLICT (dag, project, provider, type) DO UPDATE SET
+    cache_lees = cache_lees + excluded.cache_lees,
+    cache_schrijf_5m = cache_schrijf_5m + excluded.cache_schrijf_5m,
+    cache_schrijf_1u = cache_schrijf_1u + excluded.cache_schrijf_1u,
+    batch_aanroepen = batch_aanroepen + excluded.batch_aanroepen,
+    batch_gewist = batch_gewist + excluded.batch_gewist,
+    batch_wis_mislukt = batch_wis_mislukt + excluded.batch_wis_mislukt,
+    bijgewerkt = excluded.bijgewerkt`;
 
 const UPSERT_STORING = `INSERT INTO storing
   (dag, provider, soort, project, aantal, status, eerste, laatste)
@@ -227,6 +262,25 @@ export async function ontvangVerbruik(request, env) {
   const tijd = new Date(nu).toISOString();
   const stmt = env.VERBRUIK.prepare(UPSERT);
   const stmtStoring = env.VERBRUIK.prepare(UPSERT_STORING);
+  // Enkel regels met iets extra raken de tabel `verbruik_extra`: zonder cache of batch (en
+  // dus ook voor oudere clients) verandert er niets, ook niet als de tabel nog niet bestaat.
+  const stmtExtra = env.VERBRUIK.prepare(UPSERT_EXTRA);
+  const extra = regels.filter((r) => EXTRA_VELDEN.some((v) => (r[v] ?? 0) > 0))
+    .map((r) =>
+      stmtExtra.bind(
+        r.dag,
+        r.project,
+        r.provider,
+        r.type,
+        r.cache_lees ?? 0,
+        r.cache_schrijf_5m ?? 0,
+        r.cache_schrijf_1u ?? 0,
+        r.batch_aanroepen ?? 0,
+        r.batch_gewist ?? 0,
+        r.batch_wis_mislukt ?? 0,
+        tijd,
+      )
+    );
   const storingen = regels.flatMap((r) =>
     (r.storingen ?? []).map((st) =>
       stmtStoring.bind(
@@ -256,8 +310,31 @@ export async function ontvangVerbruik(request, env) {
       )
     ),
     ...storingen,
+    ...extra,
   ]);
   return antwoord({ ok: true, regels: regels.length });
+}
+
+/** GET /verbruik-extra?van=&tot=: cache-tokens en batchtellers per dag, met dezelfde leessleutel. */
+export async function leesVerbruikExtra(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const geweigerd = await leesWeigering(request, env);
+  if (geweigerd) return geweigerd;
+  const url = new URL(request.url);
+  const van = url.searchParams.get("van") || brusselseDag(-35);
+  const tot = url.searchParams.get("tot") || brusselseDag(1);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot)) {
+    return antwoord({ fout: "van/tot als YYYY-MM-DD" }, 400);
+  }
+  const { results } = await env.VERBRUIK.prepare(
+    `SELECT dag, project, provider, type, cache_lees, cache_schrijf_5m, cache_schrijf_1u,
+            batch_aanroepen, batch_gewist, batch_wis_mislukt, bijgewerkt
+       FROM verbruik_extra WHERE dag >= ?1 AND dag <= ?2
+       ORDER BY dag, project, provider, type LIMIT 5000`,
+  ).bind(van, tot).all();
+  return antwoord({ van, tot, regels: results ?? [] }, 200, {
+    "cache-control": "no-store",
+  });
 }
 
 /** Tijdsonafhankelijke vergelijking van twee teksten. */
@@ -410,6 +487,9 @@ export default {
     }
     if (pad === "/verbruik" && request.method === "GET") {
       return await leesVerbruik(request, env);
+    }
+    if (pad === "/verbruik-extra" && request.method === "GET") {
+      return await leesVerbruikExtra(request, env);
     }
     if (pad === "/storing" && request.method === "GET") {
       return await leesStoring(request, env);
