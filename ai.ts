@@ -816,8 +816,13 @@ export function bouwAnthropicBody(opties: {
       blokken.push({ type: "text", text: variabel.join("\n\n") });
     }
     body.system = cacheTtl ? blokken : blokken.map((b) => b.text).join("\n\n");
-  } else if (cacheTtl && Array.isArray(body.tools) && body.tools.length > 0) {
-    // Geen system, wel tools: het breakpoint op de laatste tool.
+  }
+  if (
+    cacheTtl && vast.length === 0 && Array.isArray(body.tools) &&
+    body.tools.length > 0
+  ) {
+    // Geen vast system, wel tools (ook als er enkel een variabel deel is): het breakpoint op
+    // de laatste tool, zodat de tools gecachet blijven.
     const tools = body.tools as Blok[];
     tools[tools.length - 1] = { ...tools[tools.length - 1], ...markering };
   }
@@ -1435,6 +1440,9 @@ export const VERBRUIK_URL = "https://beleid.holie.be/verbruik";
 export const VERBRUIK_BUNDEL_MS = 500;
 /** Harde timeout op de POST: een trage Worker mag niemand ophouden. */
 export const VERBRUIK_TIMEOUT_MS = 2000;
+/** Grenzen per regel van de Worker (`VERBRUIK_MAX_AANROEPEN_REGEL`, `VERBRUIK_MAX_USD_REGEL`). */
+const VERBRUIK_REGEL_MAX_AANROEPEN = 10_000;
+const VERBRUIK_REGEL_MAX_USD = 50;
 /** Zoveel regels hoogstens per POST (de Worker weigert meer). */
 const VERBRUIK_MAX_REGELS = 50;
 
@@ -1561,7 +1569,21 @@ export function meldAiVerbruik(melding: VerbruikMelding): void {
     const dag = brusselseDag();
     const provider = String(melding.provider || "geen").replace(/-vision$/, "");
     const type = String(melding.type || "tekst");
-    const sleutel = `${dag}|${project}|${provider}|${type}`;
+    const basisSleutel = `${dag}|${project}|${provider}|${type}`;
+    const usd = Number(melding.usd ?? 0);
+    const bedrag = Number.isFinite(usd) && usd > 0 ? usd : 0;
+    // De Worker weigert een regel boven 10.000 aanroepen of USD 50 (en dan de hele POST):
+    // een volle regel blijft staan en de melding opent een nieuwe regel (zelfde sleutel + volgnummer).
+    let sleutel = basisSleutel;
+    for (let n = 1;; n++) {
+      const bestaand = wachtrij.get(sleutel);
+      if (
+        !bestaand ||
+        (bestaand.aanroepen + 1 <= VERBRUIK_REGEL_MAX_AANROEPEN &&
+          bestaand.usd + bedrag <= VERBRUIK_REGEL_MAX_USD)
+      ) break;
+      sleutel = `${basisSleutel}#${n}`;
+    }
     const regel = wachtrij.get(sleutel) ?? {
       dag,
       project,
@@ -1574,8 +1596,7 @@ export function meldAiVerbruik(melding: VerbruikMelding): void {
       fouten: 0,
     };
     regel.aanroepen += 1;
-    const usd = Number(melding.usd ?? 0);
-    regel.usd += Number.isFinite(usd) && usd > 0 ? usd : 0;
+    regel.usd += bedrag;
     if (melding.terugval) regel.terugval += 1;
     if (!melding.label) regel.zonder_label += 1;
     if (melding.fout) regel.fouten += 1;
@@ -3258,17 +3279,36 @@ export interface BatchOpties extends AiOpties {
    * dan de gewone Anthropic-sleutel.
    */
   batchSleutelEnv?: string;
+  /**
+   * Time-out per vraag aan de Batch API in ms, los van `timeoutMs` (dat is voor `callAi`).
+   * Standaard 120 s voor indienen, 300 s voor de resultaten en 60 s voor de rest.
+   */
+  batchTimeoutMs?: number;
   /** Tijd tussen twee statusvragen, standaard `BATCH_POLL_MS`. */
   pollMs?: number;
   /** Zo lang wachten op het einde van de batch, standaard `BATCH_MAX_WACHT_MS`; daarna annuleren. */
   maxWachtMs?: number;
   /**
-   * Na het ophalen en de terugval, VOOR de DELETE. Schrijf hier de resultaten weg: gooit dit,
-   * dan blijft de batch bestaan (`wissen: "overgeslagen"`) en kun je hem opnieuw ophalen.
+   * Na het ophalen en de terugval, VOOR de DELETE. Schrijf hier de resultaten weg. Gooit dit,
+   * dan geen DELETE nu (`wissen: "overgeslagen"`); geldt de DELETE-plicht (alles behalve
+   * `publiek`), dan komt de batch in de wiswachtrij en wordt hij bij de volgende run gewist.
    */
   bijResultaten?: (resultaten: BatchResultaat[]) => void | Promise<void>;
-  /** `false`: niet wissen (je wist zelf met `wisBatch` na het wegschrijven). Standaard `true`. */
+  /**
+   * `false`: niet wissen (je wist zelf met `wisBatch` na het wegschrijven). Enkel voor
+   * `indienBatch` en `ophalenBatch`, waar je het batch-id in de hand hebt; `callAiBatch` weigert
+   * het (RangeError) zodra de DELETE-plicht geldt. Standaard `true`.
+   */
   wis?: boolean;
+  /**
+   * Wat de batch niet leverde krijgt geen `callAi`-terugval maar `fout` (intern gebruikt bij
+   * afbreken met een signal).
+   */
+  zonderTerugval?: boolean;
+  /** Hoe vaak een voorbijgaande fout bij het ophalen herkanst wordt, standaard 5. */
+  maxPollFouten?: number;
+  /** Hoe lang na annuleren gewacht wordt op `ended`, standaard 10 minuten. */
+  annuleerWachtMs?: number;
 }
 
 /** Uitkomst per verzoek. */
@@ -3342,6 +3382,7 @@ function batchSleutel(opties: BatchOpties): string | undefined {
  */
 export async function batchToegestaan(
   opties: BatchOpties,
+  verzoeken: BatchVerzoek[] = [],
 ): Promise<BatchPoort> {
   const weiger = (
     reden: string,
@@ -3352,7 +3393,7 @@ export async function batchToegestaan(
   let beleid: AiBeleid | undefined;
   if (project) {
     try {
-      const { uitslag } = await kiesAiVolgorde("tekst", {
+      const { uitslag } = await kiesAiVolgorde(batchType(verzoeken, opties), {
         label: opties.label,
         volgorde: ["anthropic"],
         pakket: ["anthropic"],
@@ -3386,6 +3427,18 @@ export async function batchToegestaan(
     ? geldendeToelating(beleid, BATCH_BELEIDSNAAM, gegevens, project)
     : undefined;
   if (eigen?.regel) {
+    if (
+      eigen.status !== "uitgesloten" && eigen.regel.toestemming_vereist &&
+      !opties.toestemming?.includes(BATCH_BELEIDSNAAM)
+    ) {
+      return {
+        toegestaan: false,
+        reden:
+          `batch voor "${gegevens}" vraagt toestemming ("${BATCH_BELEIDSNAAM}" in \`toestemming\`)`,
+        gegevens,
+        wisPlicht,
+      };
+    }
     if (eigen.status === "uitgesloten") {
       return {
         toegestaan: false,
@@ -3414,6 +3467,16 @@ export async function batchToegestaan(
 
 const BATCH_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
+/** Het type aansturing van een batch, zoals `callAi` het afleidt; tools per verzoek tellen mee. */
+function batchType(verzoeken: BatchVerzoek[], opties: BatchOpties): AiType {
+  return opties.type ??
+    (opties.tools || verzoeken.some((v) => v.tools && v.tools.length > 0)
+      ? "tools"
+      : opties.beeld
+      ? "beeld-in"
+      : "tekst");
+}
+
 function batchHeaders(sleutel: string): Record<string, string> {
   return {
     "x-api-key": sleutel,
@@ -3426,11 +3489,14 @@ async function batchVraag(
   url: string,
   init: RequestInit,
   opties: BatchOpties,
-  timeoutMs = 60_000,
+  standaardMs = 60_000,
 ): Promise<Response> {
   return await fetch(url, {
     ...init,
-    signal: combineerSignalen(opties.timeoutMs ?? timeoutMs, opties.signal),
+    signal: combineerSignalen(
+      opties.batchTimeoutMs ?? standaardMs,
+      opties.signal,
+    ),
   });
 }
 
@@ -3478,7 +3544,7 @@ export async function indienBatch(
     if (gezien.has(v.id)) throw new RangeError(`dubbele id "${v.id}"`);
     gezien.add(v.id);
   }
-  const poort = await batchToegestaan(opties);
+  const poort = await batchToegestaan(opties, verzoeken);
   if (!poort.toegestaan) throw new AiBatchGeweigerd(poort);
   const sleutel = batchSleutel(opties)!;
   const r = await batchVraag(
@@ -3713,8 +3779,7 @@ export async function ophalenBatch(
     ? await leesBatchResultaten(st.resultsUrl, opties)
     : new Map<string, Record<string, unknown>>();
   const model = opties.anthropicModel ?? STANDAARD_MODELLEN.anthropic;
-  const type: AiType = opties.type ??
-    (opties.tools ? "tools" : opties.beeld ? "beeld-in" : "tekst");
+  const type: AiType = batchType(verzoeken, opties);
   const project = aiProject(opties);
   const resultaten = new Map<string, BatchResultaat>();
   const terugvallen: { v: BatchVerzoek; reden: string }[] = [];
@@ -3798,14 +3863,27 @@ export async function ophalenBatch(
     );
   }
   let wissen: WisUitkomst = "overgeslagen";
+  let openGebleven = false;
   if (hookGelukt && opties.wis !== false) {
     wissen = await wisBatch(handle.batchId, opties);
+  } else if (!hookGelukt && handle.wisPlicht) {
+    // De DELETE-plicht gaat voor: de batch komt in de wiswachtrij en wordt bij de volgende run
+    // gewist (of met `ruimBatchesOp`), ook al is het resultaat niet weggeschreven.
+    openGebleven = true;
+    wisWachtrij.set(handle.batchId, {
+      sleutel: batchSleutel(opties)!,
+      sinds: Date.now(),
+    });
   }
 
   // Teller: het halve tarief, de cache-tokens en (op de eerste regel) de DELETE-stand.
   if (project) {
     const label = opties.gegevens !== undefined;
-    const stand = wissen === "overgeslagen" ? undefined : wissen;
+    const stand = wissen !== "overgeslagen"
+      ? wissen
+      : openGebleven
+      ? "mislukt"
+      : undefined;
     if (kosten.length === 0) {
       meldAiVerbruik({
         project,
@@ -3845,12 +3923,25 @@ async function batchTerugval(
     maxWachtMs: _m,
     batchSleutelEnv: _s,
     wis: _w,
+    batchTimeoutMs: _bt,
+    zonderTerugval: _zt,
+    maxPollFouten: _mp,
+    annuleerWachtMs: _aw,
     ...gewoon
   } = opties;
   let volgende = 0;
   const werker = async () => {
     while (volgende < lijst.length) {
       const { v, reden } = lijst[volgende++];
+      if (opties.zonderTerugval) {
+        resultaten.set(v.id, {
+          id: v.id,
+          bron: "terugval",
+          reden,
+          fout: "geen terugval (afgebroken)",
+        });
+        continue;
+      }
       try {
         const antwoord = await callAi(v.messages, {
           ...gewoon,
@@ -3893,6 +3984,15 @@ export async function callAiBatch(
   opties: BatchOpties,
 ): Promise<BatchResultaat[]> {
   if (verzoeken.length === 0) return [];
+  if (opties.wis === false) {
+    // Zonder batch-id in de hand kan niemand later nog wissen: niet bij een DELETE-plicht.
+    const poort = await batchToegestaan(opties, verzoeken);
+    if (poort.toegestaan && poort.wisPlicht) {
+      throw new RangeError(
+        `wis: false kan niet in callAiBatch voor "${poort.gegevens}" (DELETE-plicht); gebruik indienBatch en ophalenBatch`,
+      );
+    }
+  }
   // Eerst opruimen wat een vorige run niet kon wissen.
   if (wisWachtrij.size > 0) await wisOpenBatches(opties);
 
@@ -3921,32 +4021,207 @@ export async function callAiBatch(
 
   const pollMs = opties.pollMs ?? BATCH_POLL_MS;
   const eind = Date.now() + (opties.maxWachtMs ?? BATCH_MAX_WACHT_MS);
-  let geannuleerd = false;
-  try {
-    while (true) {
-      const r = await ophalenBatch(handle, verzoeken, opties);
-      if (r.klaar) return r.resultaten;
-      if (opties.signal?.aborted) {
-        throw new DOMException("afgebroken", "AbortError");
-      }
-      if (Date.now() >= eind) {
-        if (geannuleerd) break; // al geannuleerd en nog niet ended: opgeven
-        geannuleerd = true;
-        await annuleerBatch(handle.batchId, opties);
-      }
-      await slaap(pollMs);
+  const maxFouten = opties.maxPollFouten ?? 5;
+  let fouten = 0;
+  while (true) {
+    if (opties.signal?.aborted) {
+      return await geefBatchOp(
+        handle,
+        verzoeken,
+        opties,
+        "afgebroken door de aanroeper",
+        true,
+      );
     }
+    try {
+      const r = await ophalenBatch(handle, verzoeken, opties);
+      fouten = 0;
+      if (r.klaar) return r.resultaten;
+    } catch (e) {
+      if (opties.signal?.aborted) continue; // de kop van de lus handelt het af
+      if (!batchFoutVoorbijgaand(e) || ++fouten > maxFouten) {
+        return await geefBatchOp(
+          handle,
+          verzoeken,
+          opties,
+          `ophalen faalde: ${foutTekst(e)}`,
+          false,
+        );
+      }
+      // Een voorbijgaande fout (5xx, 429, netwerk) herkansen met backoff; de batch loopt door.
+      console.warn(
+        `[ai:${opties.label}] batch ${handle.batchId} ophalen faalde (poging ${fouten}/${maxFouten}): ${
+          foutTekst(e)
+        }`,
+      );
+      await slaap(
+        Math.min(Math.max(pollMs, 1) * 2 ** (fouten - 1), 5 * 60_000),
+      );
+      continue;
+    }
+    if (Date.now() >= eind) {
+      return await geefBatchOp(
+        handle,
+        verzoeken,
+        opties,
+        `na ${
+          (opties.maxWachtMs ?? BATCH_MAX_WACHT_MS) / 1000
+        } s nog niet klaar`,
+        false,
+      );
+    }
+    await slaap(pollMs);
+  }
+}
+
+/** Is dit een fout waarbij opnieuw proberen zin heeft (5xx, 429, time-out, netwerk)? */
+function batchFoutVoorbijgaand(e: unknown): boolean {
+  if (e instanceof AiBatchFout) {
+    return e.status === 0 || e.status === 429 || e.status >= 500;
+  }
+  if (e instanceof RangeError || e instanceof AiBatchGeweigerd) return false;
+  return true; // fetch zelf faalde: netwerk of time-out
+}
+
+/**
+ * Een batch die niet normaal afloopt: annuleren (ook bij afbreken door een signal), begrensd
+ * wachten tot `ended` (`annuleerWachtMs`), dan ophalen wat al gelukt is. Enkel wat de batch niet
+ * leverde (canceled, expired, errored) gaat naar de terugval, behalve bij afbreken: dan krijgt
+ * dat een `fout`. Komt de batch niet op `ended`, dan staat hij in de wiswachtrij en op de teller
+ * als `batch_wis_mislukt`, en volgt de terugval voor alles.
+ */
+async function geefBatchOp(
+  handle: BatchHandle,
+  verzoeken: BatchVerzoek[],
+  opties: BatchOpties,
+  reden: string,
+  afgebroken: boolean,
+): Promise<BatchResultaat[]> {
+  console.warn(
+    `[ai:${opties.label}] batch ${handle.batchId} opgegeven, annuleren: ${reden}`,
+  );
+  // Zonder het signal van de aanroeper: de opruiming moet ook na een abort lopen.
+  const zonder: BatchOpties = {
+    ...opties,
+    signal: undefined,
+    ...(afgebroken ? { zonderTerugval: true } : {}),
+  };
+  try {
+    await annuleerBatch(handle.batchId, zonder);
   } catch (e) {
+    // bv. al ended: de statusvraag hieronder beslist
     console.warn(
-      `[ai:${opties.label}] batch ${handle.batchId} ophalen faalde: ${
+      `[ai:${opties.label}] batch ${handle.batchId} annuleren mislukte: ${
         foutTekst(e)
       }`,
     );
   }
-  // Niet af te ronden: de batch alsnog proberen te wissen (komt anders in de wiswachtrij).
+  const eind = Date.now() + (opties.annuleerWachtMs ?? 10 * 60_000);
+  const pollMs = Math.max(opties.pollMs ?? BATCH_POLL_MS, 1);
+  let ended = false;
+  while (true) {
+    try {
+      ended = (await batchStatus(handle.batchId, zonder)).status === "ended";
+    } catch {
+      // een volgende ronde, tot de tijd om is
+    }
+    if (ended || Date.now() >= eind) break;
+    await slaap(Math.min(pollMs, 5000));
+  }
+  if (ended) {
+    try {
+      const r = await ophalenBatch(handle, verzoeken, zonder);
+      if (r.klaar) return r.resultaten;
+    } catch (e) {
+      console.warn(
+        `[ai:${opties.label}] batch ${handle.batchId} ophalen na annuleren faalde: ${
+          foutTekst(e)
+        }`,
+      );
+    }
+  }
+  // Niet op te halen: de DELETE-plicht blijft staan.
   wisWachtrij.set(handle.batchId, {
     sleutel: batchSleutel(opties)!,
     sinds: Date.now(),
   });
-  return await allesTerug(`batch ${handle.batchId} niet afgerond`);
+  const project = aiProject(opties);
+  if (project && handle.wisPlicht) {
+    meldAiVerbruik({
+      project,
+      provider: "anthropic",
+      type: batchType(verzoeken, opties),
+      fout: true,
+      batch: true,
+      batchWissen: "mislukt",
+      label: opties.gegevens !== undefined,
+    });
+  }
+  const resultaten = new Map<string, BatchResultaat>();
+  await batchTerugval(
+    verzoeken.map((v) => ({ v, reden: `batch ${handle.batchId}: ${reden}` })),
+    resultaten,
+    zonder,
+  );
+  return verzoeken.map((v) => resultaten.get(v.id)!);
+}
+
+/**
+ * Ruimt batches op die achterbleven (een proces dat stopte voor de DELETE, een mislukte DELETE
+ * zonder wiswachtrij): lijst met de batchsleutel de batches van de workspace op en wis alles wat
+ * `ended` is en ouder dan `ouderDanMs`. Een lopende batch blijft staan.
+ *
+ * ⚠️ Dit wist ALLES wat ended en oud genoeg is in de workspace van de sleutel, ook van andere
+ * gebruikers van dezelfde sleutel die hun resultaten nog niet ophaalden. Gebruik daarom een
+ * aparte batchsleutel (`ANTHROPIC_BATCH_API_KEY`, eigen workspace) en een `ouderDanMs` ruim boven
+ * de tijd die een consument nodig heeft (bv. 3 uur). Gooit nooit.
+ */
+export async function ruimBatchesOp(
+  opties: BatchOpties & { ouderDanMs: number },
+): Promise<{ gewist: number; mislukt: number; gezien: number }> {
+  const uit = { gewist: 0, mislukt: 0, gezien: 0 };
+  const sleutel = batchSleutel(opties);
+  if (!sleutel) {
+    console.warn(`[ai:${opties.label}] ruimBatchesOp: geen sleutel`);
+    return uit;
+  }
+  const grens = Date.now() - opties.ouderDanMs;
+  let na: string | undefined;
+  try {
+    for (let pagina = 0; pagina < 50; pagina++) {
+      const r = await batchVraag(
+        `${BATCH_URL}?limit=100${
+          na ? `&after_id=${encodeURIComponent(na)}` : ""
+        }`,
+        { method: "GET", headers: batchHeaders(sleutel) },
+        opties,
+      );
+      if (!r.ok) {
+        await r.body?.cancel().catch(() => {});
+        throw new AiBatchFout(`batches oplijsten gaf ${r.status}`, r.status);
+      }
+      const d = await r.json();
+      const lijst: {
+        id?: string;
+        processing_status?: string;
+        created_at?: string;
+      }[] = Array.isArray(d?.data) ? d.data : [];
+      for (const b of lijst) {
+        uit.gezien++;
+        const gemaakt = Date.parse(String(b.created_at ?? ""));
+        if (
+          !b.id || b.processing_status !== "ended" ||
+          Number.isNaN(gemaakt) || gemaakt > grens
+        ) continue;
+        const w = await wisBatch(b.id, opties, 0);
+        if (w === "gewist") uit.gewist++;
+        else uit.mislukt++;
+      }
+      if (!d?.has_more || !d?.last_id) break;
+      na = String(d.last_id);
+    }
+  } catch (e) {
+    console.warn(`[ai:${opties.label}] ruimBatchesOp faalde: ${foutTekst(e)}`);
+  }
+  return uit;
 }

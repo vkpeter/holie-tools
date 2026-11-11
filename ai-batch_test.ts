@@ -20,7 +20,9 @@ import {
   callAi,
   callAiBatch,
   indienBatch,
+  meldAiVerbruik,
   ophalenBatch,
+  ruimBatchesOp,
   schatUsd,
   stelAiBeleidIn,
   wisAiVerbruik,
@@ -50,7 +52,13 @@ const RESULTATEN =
 const ID = `${BATCH_URL}/msgbatch_1`;
 const vraag = [{ role: "user", content: "hoi" }];
 
-type Oproep = { url: string; method: string; body?: string; key?: string };
+type Oproep = {
+  url: string;
+  method: string;
+  body?: string;
+  key?: string;
+  signal?: AbortSignal | null;
+};
 type Handler = (o: Oproep) => Response | Promise<Response>;
 
 function bericht(
@@ -101,6 +109,7 @@ function test(
         method: init?.method ?? "GET",
         body: init?.body as string | undefined,
         key: h["x-api-key"],
+        signal: init?.signal,
       };
       oproepen.push(o);
       return await handler(o);
@@ -840,11 +849,367 @@ test("bijResultaten loopt vóór de DELETE; wis:false wist niet", async ({ oproe
   assert(nogGeenDelete);
   assert(oproepen.some((o) => o.method === "DELETE"));
   oproepen.length = 0;
+  // publiek (geen DELETE-plicht): wis:false mag, en wist niet
   await callAiBatch(
     [{ id: "a", messages: vraag }],
-    basis("vacatures", { wis: false }),
+    basis("podcast", { wis: false }),
   );
   assert(!oproepen.some((o) => o.method === "DELETE"));
+});
+
+test("wis:false in callAiBatch wordt geweigerd bij een DELETE-plicht, zonder oproepen", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  zet(nepApi());
+  await assertRejects(
+    () =>
+      callAiBatch(
+        [{ id: "a", messages: vraag }],
+        basis("vacatures", { wis: false }),
+      ),
+    RangeError,
+    "DELETE-plicht",
+  );
+  assertEquals(oproepen.length, 0);
+  // in de twee-fase-API blijft het kunnen
+  const o = basis("vacatures", { wis: false });
+  const v = [{ id: "a", messages: vraag }];
+  const h = await indienBatch(v, o);
+  const r = await ophalenBatch(h, v, o);
+  assert(r.klaar && r.wissen === "overgeslagen");
+});
+
+test("bijResultaten gooit bij DELETE-plicht: batch in de wiswachtrij en op de teller", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({
+    momentopname: AI_BELEID,
+    project: "vacatures",
+    verbruik: NEP,
+  });
+  zet(nepApi());
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }],
+    basis("vacatures", {
+      bijResultaten: () => {
+        throw new Error("schrijven mislukt");
+      },
+    }),
+  );
+  assertEquals(r[0].bron, "batch");
+  assert(!oproepen.some((o) => o.method === "DELETE"));
+  assertEquals(batchWisWachtrij(), ["msgbatch_1"]);
+  assertEquals(aiVerbruikWachtrij()[0].batch_wis_mislukt, 1);
+  // volgende run wist hem alsnog
+  oproepen.length = 0;
+  zet(nepApi());
+  await callAiBatch([{ id: "b", messages: vraag }], basis("vacatures"));
+  assert(oproepen.some((o) => o.method === "DELETE"));
+  assertEquals(batchWisWachtrij(), []);
+});
+
+// --- onderbreking, abort, time-outs ---------------------------------------
+
+/** Een nep-API waarvan de statusvraag volgens een script faalt (`fout`) of een status geeft. */
+function metStatusScript(
+  script: ("503" | "net" | "in_progress" | "ended" | "canceling")[],
+  uit: Parameters<typeof nepApi>[0] = {},
+  bijGet?: () => void,
+): Handler {
+  const echt = nepApi({ ...uit, status: ["ended"] });
+  const stappen = [...script];
+  return (o) => {
+    if (o.url === ID && o.method === "GET") {
+      bijGet?.();
+      const st = stappen.length > 1 ? stappen.shift()! : stappen[0];
+      if (st === "503") return new Response("stuk", { status: 503 });
+      if (st === "net") throw new TypeError("netwerk");
+      if (st === "in_progress" || st === "canceling") {
+        return json({ id: "msgbatch_1", processing_status: st });
+      }
+    }
+    return echt(o);
+  };
+}
+
+test("een voorbijgaande pollfout wordt herkanst: de batch loopt door, geen terugval", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  zet(metStatusScript(["in_progress", "503", "net", "429" as "503", "ended"]));
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }],
+    basis("vacatures"),
+  );
+  assertEquals(r[0].bron, "batch");
+  assertEquals(oproepen.filter((o) => o.url === SYNC).length, 0);
+  assert(!oproepen.some((o) => o.url.endsWith("/cancel")));
+});
+
+test("pollfouten blijven aanhouden: annuleren, tot ended wachten, gelukte verzoeken houden", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  let gets = 0;
+  zet(metStatusScript(
+    ["503", "503", "503", "ended"],
+    {
+      resultaten: () => [
+        {
+          custom_id: "a",
+          result: { type: "succeeded", message: bericht("a") },
+        },
+        { custom_id: "b", result: { type: "canceled" } },
+      ],
+    },
+    () => gets++,
+  ));
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }, { id: "b", messages: vraag }],
+    basis("vacatures", { maxPollFouten: 2 }),
+  );
+  assertEquals(r.map((x) => [x.id, x.bron]), [["a", "batch"], [
+    "b",
+    "terugval",
+  ]]);
+  assertEquals(r[0].antwoord?.content, "a");
+  assert(oproepen.some((o) => o.url.endsWith("/cancel")));
+  assertEquals(oproepen.filter((o) => o.url === SYNC).length, 1);
+  assert(oproepen.some((o) => o.method === "DELETE"));
+});
+
+test("maxWachtMs overschreden: annuleren, wachten op ended, daarna ophalen; enkel canceled naar terugval", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  zet(metStatusScript(
+    ["in_progress", "canceling", "canceling", "ended"],
+    {
+      resultaten: () => [
+        {
+          custom_id: "a",
+          result: { type: "succeeded", message: bericht("a") },
+        },
+        { custom_id: "b", result: { type: "canceled" } },
+        { custom_id: "c", result: { type: "expired" } },
+      ],
+    },
+  ));
+  const r = await callAiBatch(
+    ["a", "b", "c"].map((id) => ({ id, messages: vraag })),
+    basis("vacatures", { maxWachtMs: 0 }),
+  );
+  assertEquals(r.map((x) => x.bron), ["batch", "terugval", "terugval"]);
+  assertEquals(r[0].antwoord?.content, "a");
+  assertEquals(oproepen.filter((o) => o.url === SYNC).length, 2);
+  assertEquals(
+    oproepen.filter((o) => o.url.endsWith("/cancel")).length,
+    1,
+  );
+  assert(oproepen.some((o) => o.method === "DELETE"));
+});
+
+test("niet op ended te krijgen na annuleren: wiswachtrij, teller en terugval", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({
+    momentopname: AI_BELEID,
+    project: "vacatures",
+    verbruik: NEP,
+  });
+  zet(metStatusScript(["canceling"]));
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }],
+    basis("vacatures", { maxWachtMs: 0, annuleerWachtMs: 5 }),
+  );
+  assertEquals(r[0].bron, "terugval");
+  assertEquals(batchWisWachtrij(), ["msgbatch_1"]);
+  assert(!oproepen.some((o) => o.method === "DELETE"));
+  assertEquals(
+    aiVerbruikWachtrij().find((x) => x.batch_wis_mislukt)?.batch_wis_mislukt,
+    1,
+  );
+});
+
+test("abort: de batch wordt geannuleerd, gelukte verzoeken blijven, de rest krijgt een fout zonder callAi", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  const ac = new AbortController();
+  zet(metStatusScript(
+    ["in_progress", "ended"],
+    {
+      resultaten: () => [
+        {
+          custom_id: "a",
+          result: { type: "succeeded", message: bericht("a") },
+        },
+        { custom_id: "b", result: { type: "canceled" } },
+      ],
+    },
+    () => ac.abort(),
+  ));
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }, { id: "b", messages: vraag }],
+    basis("vacatures", { signal: ac.signal }),
+  );
+  assertEquals(r[0].antwoord?.content, "a");
+  assertEquals(r[1].antwoord, undefined);
+  assert(r[1].fout);
+  assert(oproepen.some((o) => o.url.endsWith("/cancel")));
+  assertEquals(oproepen.filter((o) => o.url === SYNC).length, 0);
+  // de opruiming liep zonder het afgebroken signal
+  const na = oproepen.filter((o) => o.url.endsWith("/cancel"))[0];
+  assert(!na.signal?.aborted);
+});
+
+test("timeoutMs (voor callAi) bepaalt de batch-time-outs niet; batchTimeoutMs wel", async ({ oproepen, zet }) => {
+  stelAiBeleidIn({ momentopname: AI_BELEID });
+  const api = nepApi();
+  zet(async (o) => {
+    if (o.url.startsWith(BATCH_URL)) {
+      await new Promise((r) => setTimeout(r, 30));
+      if (o.signal?.aborted) throw new DOMException("t", "TimeoutError");
+    }
+    return api(o);
+  });
+  const r = await callAiBatch(
+    [{ id: "a", messages: vraag }],
+    basis("podcast", { timeoutMs: 5 }),
+  );
+  assertEquals(r[0].bron, "batch");
+  assertEquals(oproepen.filter((o) => o.url === SYNC).length, 0);
+  // een eigen, korte batch-time-out telt wel
+  oproepen.length = 0;
+  const r2 = await callAiBatch(
+    [{ id: "a", messages: vraag }],
+    basis("podcast", { batchTimeoutMs: 5 }),
+  );
+  assertEquals(r2[0].bron, "terugval");
+});
+
+// --- ruimBatchesOp ---------------------------------------------------------
+
+test("ruimBatchesOp wist enkel ended batches ouder dan de grens, over meerdere pagina's", async ({ oproepen, zet }) => {
+  const oud = new Date(Date.now() - 5 * 3600_000).toISOString();
+  const nieuw = new Date().toISOString();
+  zet((o) => {
+    if (o.url.startsWith(`${BATCH_URL}?`)) {
+      return o.url.includes("after_id=b3")
+        ? json({
+          data: [{ id: "b4", processing_status: "ended", created_at: oud }],
+          has_more: false,
+        })
+        : json({
+          data: [
+            { id: "b1", processing_status: "ended", created_at: oud },
+            { id: "b2", processing_status: "in_progress", created_at: oud },
+            { id: "b3", processing_status: "ended", created_at: nieuw },
+          ],
+          has_more: true,
+          last_id: "b3",
+        });
+    }
+    if (o.method === "GET") {
+      return json({ processing_status: "ended" });
+    }
+    return json({ type: "message_batch_deleted" });
+  });
+  const uit = await ruimBatchesOp({
+    label: "t",
+    sleutels: SLEUTELS,
+    ouderDanMs: 3 * 3600_000,
+  });
+  assertEquals(uit, { gewist: 2, mislukt: 0, gezien: 4 });
+  const wissen = oproepen.filter((o) => o.method === "DELETE").map((o) =>
+    o.url.split("/").pop()
+  );
+  assertEquals(wissen, ["b1", "b4"]);
+});
+
+test("ruimBatchesOp zonder sleutel of bij een fout: gooit niet", async ({ zet }) => {
+  assertEquals(
+    await ruimBatchesOp({ label: "t", ouderDanMs: 1 }),
+    { gewist: 0, mislukt: 0, gezien: 0 },
+  );
+  zet(() => new Response("stuk", { status: 500 }));
+  assertEquals(
+    await ruimBatchesOp({ label: "t", sleutels: SLEUTELS, ouderDanMs: 1 }),
+    { gewist: 0, mislukt: 0, gezien: 0 },
+  );
+});
+
+// --- poort: type en toestemming -------------------------------------------
+
+test("poort: projectverboden per type tellen mee, ook met tools per verzoek", async () => {
+  const b = structuredClone(AI_BELEID) as AiBeleid;
+  b.projecten.podcast.verboden = [{
+    provider: "anthropic",
+    types: ["tools"],
+    reden: "test",
+    wie: "test",
+    datum: "2026-11-11",
+  }];
+  stelAiBeleidIn({ momentopname: b });
+  const tool = [{ type: "function", function: { name: "x", parameters: {} } }];
+  assertEquals((await batchToegestaan(basis("podcast"))).toegestaan, true);
+  assertEquals(
+    (await batchToegestaan(basis("podcast"), [{ id: "a", messages: vraag }]))
+      .toegestaan,
+    true,
+  );
+  assertEquals(
+    (await batchToegestaan(basis("podcast", { tools: tool }))).toegestaan,
+    false,
+  );
+  assertEquals(
+    (await batchToegestaan(basis("podcast"), [
+      { id: "a", messages: vraag, tools: tool },
+    ])).toegestaan,
+    false,
+  );
+});
+
+test("poort: toestemming_vereist op een anthropic-batch-toelating wordt gehandhaafd", async () => {
+  const regel = {
+    ...batchRegel("persoon", "onderbouwd"),
+    toestemming_vereist: true,
+  };
+  stelAiBeleidIn({ momentopname: metToelatingen([regel]) });
+  const zonder = await batchToegestaan(basis("billara"));
+  assertEquals(zonder.toegestaan, false);
+  assertStringIncludes(zonder.reden, "toestemming");
+  const met = await batchToegestaan(
+    basis("billara", { toestemming: [BATCH_BELEIDSNAAM] }),
+  );
+  assertEquals(met.toegestaan, true);
+});
+
+// --- teller: regels splitsen, body ----------------------------------------
+
+test("teller: een regel die de grens van de Worker haalt, wordt gesplitst", async () => {
+  await Promise.resolve();
+  stelAiBeleidIn({
+    momentopname: AI_BELEID,
+    project: "podcast",
+    verbruik: NEP,
+  });
+  for (let i = 0; i < 10_001; i++) {
+    meldAiVerbruik({ provider: "anthropic", type: "tekst", batch: true });
+  }
+  const a = aiVerbruikWachtrij();
+  assertEquals(a.length, 2);
+  assertEquals(a.map((r) => r.aanroepen).sort(), [1, 10_000]);
+  assertEquals(a.reduce((n, r) => n + (r.batch_aanroepen ?? 0), 0), 10_001);
+  wisAiVerbruik();
+  for (let i = 0; i < 3; i++) {
+    meldAiVerbruik({ provider: "deepseek", type: "tekst", usd: 30 });
+  }
+  const b = aiVerbruikWachtrij();
+  assertEquals(b.length, 3);
+  assert(b.every((r) => r.usd <= 50));
+});
+
+Deno.test("tools zonder vast system maar met systemVariabel: breakpoint op de laatste tool", () => {
+  const body = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: vraag,
+    systemVariabel: "VAR",
+    tools: [
+      { type: "function", function: { name: "a", parameters: {} } },
+      { type: "function", function: { name: "b", parameters: {} } },
+    ],
+  }) as { tools: { cache_control?: unknown }[]; system: unknown };
+  assertEquals(body.tools[0].cache_control, undefined);
+  assertEquals(body.tools[1].cache_control, { type: "ephemeral" });
+  assertEquals(body.system as unknown, [{ type: "text", text: "VAR" }]);
 });
 
 test("twee fases: ophalenBatch geeft klaar:false zolang de batch loopt", async ({ zet }) => {

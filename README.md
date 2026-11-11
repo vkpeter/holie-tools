@@ -425,6 +425,19 @@ bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit 
 
 > Status: gebouwd op de branch `batch-caching`, nog niet gepubliceerd.
 
+**Uitrolvolgorde (verplicht):**
+
+1. Eerst D1:
+   `npx wrangler@4 d1 execute holie-ai-verbruik --remote --file beleid/verbruik.sql`
+   (maakt de tabel `verbruik_extra`; veilig om opnieuw te draaien).
+2. Dan de Worker (`beleid/worker.js`) uitrollen.
+3. Dan pas taggen (`v0.34.0`), waarna de CI publiceert.
+
+Een Worker vóór D1 laat elke POST met cache- of batchvelden falen (de tabel
+ontbreekt), dus ook de meldingen van gewone aanroepen met cache-verkeer. Een
+client van 0.34.0 vóór de Worker is onschadelijk: de Worker negeert onbekende
+velden.
+
 **Meting.** De dagteller (`VerbruikRegel`) draagt sinds 0.34.0 optionele velden
 `cache_lees`, `cache_schrijf_5m`, `cache_schrijf_1u`, `batch_aanroepen`,
 `batch_gewist` en `batch_wis_mislukt`; ze staan er alleen als ze groter zijn dan
@@ -488,10 +501,37 @@ _DELETE-plicht._ Na het ophalen (en `bijResultaten`, waar je wegschrijft) volgt
 eerst geannuleerd en afgewacht. Een 404 telt als gewist. Mislukt het, dan staat
 de batch in de wiswachtrij (`batchWisWachtrij`, `wisOpenBatches`; `callAiBatch`
 probeert ze bij de volgende run opnieuw) en volgt er een waarschuwing zonder
-sleutel. Gooit `bijResultaten`, dan blijft de batch staan. `wis: false` laat het
-wissen aan jou (`wisBatch`). De wiswachtrij leeft in het proces: een edge
-function die na `ophalenBatch` `wissen: "mislukt"` krijgt, bewaart het batch-id
-en roept later `wisBatch` aan.
+sleutel. Gooit `bijResultaten`, dan geen DELETE nu, maar bij een DELETE-plicht
+komt de batch in de wiswachtrij en op de teller (`batch_wis_mislukt`).
+`wis: false` is enkel voor `indienBatch` en `ophalenBatch` (jij hebt het
+batch-id en wist zelf met `wisBatch`); `callAiBatch` weigert het met een
+`RangeError` zodra de DELETE-plicht geldt.
+
+De wiswachtrij leeft in het proces. Een edge function die na `ophalenBatch`
+`wissen: "mislukt"` krijgt, bewaart het batch-id en roept later `wisBatch` aan.
+Voor wat toch achterbleef (een proces dat stopte voor de DELETE) is er
+`ruimBatchesOp({ ouderDanMs })`: het lijst met de batchsleutel de batches op en
+wist alles wat `ended` en ouder dan de grens is. Gebruik een aparte batchsleutel
+(eigen workspace) en een ruime grens (bv. 3 uur), want het wist ook resultaten
+van andere gebruikers van dezelfde sleutel die nog niet opgehaald waren. Plan
+het als dagelijkse taak.
+
+_Onderbreking._ Een voorbijgaande fout bij het ophalen (5xx, 429, netwerk) wordt
+herkanst met backoff (`maxPollFouten`, standaard 5). Daarna, bij een
+niet-voorbijgaande fout, na `maxWachtMs`, of als het `signal` afbreekt, wordt de
+batch geannuleerd en wacht de keten begrensd (`annuleerWachtMs`, standaard 10
+minuten) tot `ended`. Wat al gelukt was blijft een batch-resultaat; enkel
+canceled of expired verzoeken gaan naar `callAi` (bij afbreken krijgen ze een
+`fout`). Komt de batch niet op `ended`, dan volgt de wiswachtrij en de terugval
+voor alles. De time-outs naar de Batch API zijn los van `timeoutMs` (dat is voor
+`callAi`): `batchTimeoutMs`, standaard 120 s voor indienen, 300 s voor de
+resultaten en 60 s voor de rest. Een time-out bij indienen kan een batch zonder
+bekend id achterlaten; die vangt `ruimBatchesOp` op.
+
+_Poort en type._ De poort toetst het type zoals `callAi` het afleidt (tools per
+verzoek tellen mee), dus een projectverbod voor Anthropic op `tools` geldt ook
+hier. Een toelating `anthropic-batch` met `toestemming_vereist` vraagt
+`"anthropic-batch"` in `toestemming`.
 
 _Sleutel._ Optioneel een aparte sleutel (eigen workspace):
 `ANTHROPIC_BATCH_API_KEY`, of een andere naam via `batchSleutelEnv`. Ontbreekt
@@ -505,6 +545,9 @@ wachten (`maxWachtMs`), daarna annuleren en terugvallen.
 `system_vast`, `system_variabel` en `cache_modus="auto"`, met dezelfde
 semantiek; het cache-verkeer gaat mee naar de teller. Batch bestaat nog niet in
 Python.
+
+De teller opent een nieuwe regel zodra een regel de grens van de Worker (10.000
+aanroepen of USD 50) zou halen, zodat een grote batch de POST niet laat falen.
 
 ## Nieuw in 0.33.0 (ai): storingen in de verbruiksmelding
 
