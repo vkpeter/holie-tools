@@ -4,6 +4,8 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.35.0 ook `./gebruikers-fetch` (AdminClient op fetch, voor Workers).
+
 Sinds 0.32.0 ook `./gebruikers`:
 [gedeeld gebruikersbeheer](#gebruikers-gedeeld-gebruikersbeheer-0320).
 
@@ -114,6 +116,39 @@ const GebruikersBeheer = maakGebruikersBeheer(React);
 Een handeling die een string teruggeeft (of gooit), toont die als fout; niets
 teruggeven is gelukt. Het scherm toetst de regels al vóór de handeling, maar de
 server en de databank moeten ze zelf afdwingen.
+
+### Nieuw in 0.35.0: scherm en `./gebruikers-fetch`
+
+Bij de uitrol naar Domus (11 nov 2026) kwamen vijf gebreken boven:
+
+| wat                       | 0.35.0                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `extraKolom` op gsm       | altijd zichtbaar; `verbergSmal: true` verbergt de kolom onder 640 px (zoals vroeger)                                              |
+| donker paneel             | ook bij `prefers-color-scheme: dark`, behalve met `.light` of `[data-theme="light"]` op de root; de standaardknop blijft leesbaar |
+| ingebouwde dialoog        | focus erin bij openen, Tab blijft in het paneel, Escape sluit, daarna focus terug (of op het zoekveld als de rij weg is)          |
+| meldingen                 | `verwijderdMelding`, `gedeactiveerdMelding`, `geactiveerdMelding` in plaats van altijd "Opgeslagen."                              |
+| Worker zonder supabase-js | `maakFetchAdminClient` in `./gebruikers-fetch`                                                                                    |
+
+Wat een app merkt: een `extraKolom` die op een gsm verborgen moest blijven,
+krijgt `verbergSmal: true`; eigen CSS die de kolom terug zichtbaar maakte, mag
+weg. Een test die na verwijderen of (de)activeren "Opgeslagen." verwacht, moet
+mee. Met een eigen `Dialoog` (shadcn/Radix) verandert er niets aan de focus.
+
+```ts
+// Cloudflare Worker: AdminClient op gewone fetch, gooit nooit (time-out 10 s).
+import { maakFetchAdminClient } from "@jsr/holie__tools/gebruikers-fetch";
+import { verwijder, zetActief } from "@jsr/holie__tools/gebruikers";
+
+const admin = maakFetchAdminClient({
+  url: env.SUPABASE_URL,
+  serviceKey: env.SERVICE_ROLE_KEY,
+});
+await zetActief(admin, id, false);
+```
+
+Alle vijf de calls (`generateLink`, `getUserById`, `updateUserById`,
+`deleteUser`, `rpc`) geven dezelfde vorm als supabase-js v2; `generateLink` zet
+`redirectTo` als `redirect_to` in de query, zoals supabase-js.
 
 ## velden: één methode per invoerveld (0.31.0)
 
@@ -423,7 +458,7 @@ bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit 
 
 ## Nieuw in 0.34.0 (ai): cache-meting, systeemdelen, auto-caching en batch
 
-> Status: gebouwd op de branch `batch-caching`, nog niet gepubliceerd.
+> Status: gepubliceerd op 11 nov 2026 (`v0.34.0`).
 
 **Uitrolvolgorde (verplicht):**
 

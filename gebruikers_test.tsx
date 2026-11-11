@@ -8,6 +8,7 @@ import {
   type AdminClient,
   BAN_DUUR,
   type Gebruiker,
+  GEBRUIKERS_CSS,
   GEBRUIKERS_TEKSTEN,
   maakGebruikersBeheer,
   magDeactiveren,
@@ -647,7 +648,8 @@ Deno.test({
       assertEquals(houder.querySelectorAll("tbody tr").length, 1);
       await klik(knopMet(houder, "Deactiveren: b@x.be"));
       assertEquals(actief, [["b", false]]);
-      assert(houder.textContent?.includes("Opgeslagen."));
+      assert(houder.textContent?.includes("Gebruiker uitgeschakeld."));
+      assert(!houder.textContent?.includes("Opgeslagen."));
     } finally {
       await weg();
     }
@@ -825,7 +827,219 @@ Deno.test({
       assertEquals(rollen, [["c", ["user"]]]);
     } finally {
       await weg();
-      if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
     }
+  },
+});
+
+// ───────────── Gebreken uit de Domus-uitrol ─────────────
+
+Deno.test("extraKolom: standaard zichtbaar, met verbergSmal de klasse op kop en cellen", () => {
+  const maak = (verbergSmal?: boolean, gebruikers = RIJEN) =>
+    renderToStaticMarkup(
+      <GebruikersBeheer
+        gebruikers={gebruikers}
+        huidigeId="ik"
+        instelling={INST}
+        extraKolom={{ kop: "Toegang", cel: (g) => `T:${g.id}`, verbergSmal }}
+      />,
+    );
+  // De CSS-string bevat de klassenaam ook; toets daarom op het class-attribuut.
+  const zonder = maak();
+  assert(zonder.includes("Toegang") && zonder.includes("T:b"));
+  assert(!zonder.includes('class="holie-gb-verberg"'));
+  const met = maak(true);
+  assert(met.includes('<th class="holie-gb-verberg">Toegang</th>'));
+  assert(met.includes('<td class="holie-gb-verberg">T:b</td>'));
+  assertEquals(
+    met.split('class="holie-gb-verberg"').length - 1,
+    1 + RIJEN.length,
+  );
+  // colSpan telt de extra kolom mee.
+  assert(maak(false, []).toLowerCase().includes('colspan="5"'));
+});
+
+Deno.test("GEBRUIKERS_CSS: donker paneel ook via prefers-color-scheme, behalve bij geforceerd licht", () => {
+  assert(GEBRUIKERS_CSS.includes("@media (prefers-color-scheme:dark)"));
+  assert(
+    GEBRUIKERS_CSS.includes(
+      ':root:not(.light):not([data-theme="light"]) .holie-gb-paneel{background:#1f1f20',
+    ),
+  );
+  // De regel voor smalle schermen blijft bestaan.
+  assert(GEBRUIKERS_CSS.includes("@media (max-width:640px){.holie-gb-verberg"));
+});
+
+Deno.test("teksten: verwijderd, uitgeschakeld en ingeschakeld bestaan in alle talen", () => {
+  for (const taal of ["nl", "en", "fr", "de"] as const) {
+    const t = GEBRUIKERS_TEKSTEN[taal];
+    for (
+      const sleutel of [
+        "verwijderdMelding",
+        "gedeactiveerdMelding",
+        "geactiveerdMelding",
+      ] as const
+    ) {
+      assert(t[sleutel].length > 0, `${taal}.${sleutel}`);
+      assert(t[sleutel] !== t.opgeslagen, `${taal}.${sleutel}`);
+    }
+  }
+});
+
+Deno.test({
+  name: "scherm (DOM): de melding past bij de handeling",
+  ...opties,
+  fn: async () => {
+    const { houder, weg } = await toon(
+      <GebruikersBeheer
+        gebruikers={RIJEN}
+        huidigeId="ik"
+        instelling={INST}
+        onActief={() => null}
+        onVerwijder={() => null}
+        onOpnieuw={() => null}
+      />,
+    );
+    try {
+      await klik(knopMet(houder, "Deactiveren: b@x.be"));
+      assert(houder.textContent?.includes("Gebruiker uitgeschakeld."));
+      await klik(knopMet(houder, "Activeren: d@x.be"));
+      assert(houder.textContent?.includes("Gebruiker weer ingeschakeld."));
+      assert(!houder.textContent?.includes("Gebruiker uitgeschakeld."));
+      await klik(knopMet(houder, "Opnieuw sturen: c@x.be"));
+      assert(houder.textContent?.includes("Uitnodiging verstuurd."));
+      await klik(knopMet(houder, "Verwijderen: b@x.be"));
+      const dialoog = houder.querySelector('[role="dialog"]')!;
+      await typ(dialoog.querySelector("input") as HTMLInputElement, "b@x.be");
+      const bevestig = [...dialoog.querySelectorAll("button")].find((b) =>
+        b.textContent === "Verwijderen"
+      )!;
+      await klik(bevestig);
+      assertEquals(houder.querySelector('[role="dialog"]'), null);
+      assert(houder.textContent?.includes("Gebruiker verwijderd."));
+      assert(!houder.textContent?.includes("Opgeslagen."));
+    } finally {
+      await weg();
+    }
+  },
+});
+
+const toets = async (el: Element, key: string, shiftKey = false) => {
+  await act(() => {
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        shiftKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+};
+
+Deno.test({
+  name:
+    "dialoog: focus naar binnen, Tab blijft binnen, Escape sluit, focus terug",
+  ...opties,
+  fn: async () => {
+    const { houder, weg } = await toon(
+      <GebruikersBeheer
+        gebruikers={RIJEN}
+        huidigeId="ik"
+        instelling={INST}
+        onBewaar={() => null}
+      />,
+    );
+    try {
+      const trigger = knopMet(houder, "Bewerken: b@x.be")!;
+      trigger.focus();
+      assertEquals(document.activeElement, trigger);
+      await klik(trigger);
+      const paneel = houder.querySelector('[role="dialog"]')!;
+      const focusbaar = [
+        ...paneel.querySelectorAll("input,select,button"),
+      ] as HTMLElement[];
+      assert(focusbaar.length >= 2);
+      // Focus staat in het paneel, op het eerste element.
+      assertEquals(document.activeElement, focusbaar[0]);
+      // Tab op het laatste springt naar het eerste.
+      const laatste = focusbaar[focusbaar.length - 1];
+      laatste.focus();
+      await toets(laatste, "Tab");
+      assertEquals(document.activeElement, focusbaar[0]);
+      // Shift+Tab op het eerste springt naar het laatste.
+      await toets(focusbaar[0], "Tab", true);
+      assertEquals(document.activeElement, laatste);
+      // Escape sluit en geeft de focus terug.
+      await toets(laatste, "Escape");
+      assertEquals(houder.querySelector('[role="dialog"]'), null);
+      assertEquals(document.activeElement, trigger);
+    } finally {
+      await weg();
+    }
+  },
+});
+
+Deno.test({
+  name: "dialoog: het paneel is zelf focusbaar als terugval (tabindex -1)",
+  ...opties,
+  fn: async () => {
+    const { houder, weg } = await toon(
+      <GebruikersBeheer
+        gebruikers={RIJEN}
+        huidigeId="ik"
+        instelling={INST}
+        onVerwijder={() => null}
+      />,
+    );
+    try {
+      await klik(knopMet(houder, "Verwijderen: b@x.be"));
+      const paneel = houder.querySelector('[role="dialog"]') as HTMLElement;
+      assertEquals(paneel.getAttribute("tabindex"), "-1");
+      // Het bevestigingsveld is het eerste focusbare element.
+      assertEquals(document.activeElement, paneel.querySelector("input"));
+    } finally {
+      await weg();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "dialoog: bestaat het element van vóór het openen niet meer, dan naar het zoekveld",
+  ...opties,
+  fn: async () => {
+    const { houder, weg } = await toon(
+      <GebruikersBeheer
+        gebruikers={RIJEN}
+        huidigeId="ik"
+        instelling={INST}
+        onVerwijder={() => null}
+      />,
+    );
+    try {
+      const trigger = knopMet(houder, "Verwijderen: b@x.be")!;
+      trigger.focus();
+      await klik(trigger);
+      // De rij verdwijnt terwijl de dialoog openstaat.
+      trigger.remove();
+      const paneel = houder.querySelector('[role="dialog"]')!;
+      await toets(paneel.querySelector("input")!, "Escape");
+      assertEquals(houder.querySelector('[role="dialog"]'), null);
+      assertEquals(
+        document.activeElement,
+        houder.querySelector('input[type="search"]'),
+      );
+    } finally {
+      await weg();
+    }
+  },
+});
+
+// Laatste test van het bestand: happy-dom weer uitzetten (anders faalt het proces bij het afsluiten).
+Deno.test({
+  name: "opruimen: happy-dom afmelden",
+  ...opties,
+  fn: async () => {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   },
 });

@@ -591,6 +591,12 @@ export interface GebruikersTeksten {
   laden: string;
   bezig: string;
   opgeslagen: string;
+  /** Na verwijderen. */
+  verwijderdMelding: string;
+  /** Na uitschakelen. */
+  gedeactiveerdMelding: string;
+  /** Na weer inschakelen. */
+  geactiveerdMelding: string;
   uitnodigingVerstuurd: string;
   onbekendeFout: string;
   zelf: string;
@@ -646,6 +652,9 @@ export const GEBRUIKERS_TEKSTEN: Record<
     laden: "Laden…",
     bezig: "Bezig…",
     opgeslagen: "Opgeslagen.",
+    verwijderdMelding: "Gebruiker verwijderd.",
+    gedeactiveerdMelding: "Gebruiker uitgeschakeld.",
+    geactiveerdMelding: "Gebruiker weer ingeschakeld.",
     uitnodigingVerstuurd: "Uitnodiging verstuurd.",
     onbekendeFout: "Er ging iets mis. Probeer opnieuw.",
     zelf: "Dat kan niet voor je eigen account.",
@@ -695,6 +704,9 @@ export const GEBRUIKERS_TEKSTEN: Record<
     laden: "Loading…",
     bezig: "Busy…",
     opgeslagen: "Saved.",
+    verwijderdMelding: "User deleted.",
+    gedeactiveerdMelding: "User disabled.",
+    geactiveerdMelding: "User enabled again.",
     uitnodigingVerstuurd: "Invitation sent.",
     onbekendeFout: "Something went wrong. Please try again.",
     zelf: "Not possible for your own account.",
@@ -744,6 +756,9 @@ export const GEBRUIKERS_TEKSTEN: Record<
     laden: "Chargement…",
     bezig: "Un instant…",
     opgeslagen: "Enregistré.",
+    verwijderdMelding: "Utilisateur supprimé.",
+    gedeactiveerdMelding: "Utilisateur désactivé.",
+    geactiveerdMelding: "Utilisateur réactivé.",
     uitnodigingVerstuurd: "Invitation envoyée.",
     onbekendeFout: "Une erreur s'est produite. Réessayez.",
     zelf: "Impossible pour votre propre compte.",
@@ -793,6 +808,9 @@ export const GEBRUIKERS_TEKSTEN: Record<
     laden: "Wird geladen…",
     bezig: "Einen Moment…",
     opgeslagen: "Gespeichert.",
+    verwijderdMelding: "Benutzer gelöscht.",
+    gedeactiveerdMelding: "Benutzer deaktiviert.",
+    geactiveerdMelding: "Benutzer wieder aktiviert.",
     uitnodigingVerstuurd: "Einladung gesendet.",
     onbekendeFout: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
     zelf: "Für Ihr eigenes Konto nicht möglich.",
@@ -869,6 +887,10 @@ export interface BeheerOnderdelen {
 export interface ExtraKolom {
   kop: Inhoud;
   cel: (g: Gebruiker) => Inhoud;
+  /**
+   * Kolom verbergen onder 640px (klasse `holie-gb-verberg`). Standaard altijd zichtbaar.
+   */
+  verbergSmal?: boolean;
 }
 
 /**
@@ -906,6 +928,22 @@ export interface GebruikersBeheerProps {
   className?: string;
 }
 
+/** Het stukje DOM dat de ingebouwde dialoog nodig heeft (de module draait ook zonder DOM-typen). */
+type DomEl = {
+  focus(): void;
+  isConnected: boolean;
+  contains(el: unknown): boolean;
+  hasAttribute(naam: string): boolean;
+  getAttribute(naam: string): string | null;
+  querySelector(kies: string): DomEl | null;
+  querySelectorAll(kies: string): ArrayLike<DomEl>;
+};
+const doc = () =>
+  (globalThis as { document?: { activeElement: DomEl | null } }).document;
+
+const FOCUSBAAR =
+  'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])';
+
 /** De opmaak zonder eigen componenten. Geen Tailwind: werkt overal. */
 export const GEBRUIKERS_CSS = `
 .holie-gb{display:flex;flex-direction:column;gap:1rem;width:100%}
@@ -934,7 +972,12 @@ export const GEBRUIKERS_CSS = `
 .holie-gb-melding[data-soort="fout"]{color:#b3261e;border-color:rgba(179,38,30,.4)}
 .holie-gb-scherm{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(0,0,0,.45)}
 .holie-gb-paneel{width:100%;max-width:28rem;max-height:90vh;overflow:auto;padding:1.25rem;border-radius:var(--radius,.5rem);background:#fff;color:#1f1f1f}
-.dark .holie-gb-paneel,[data-theme="dark"] .holie-gb-paneel{background:#1f1f20;color:#e3e3e3}
+.dark .holie-gb-paneel,[data-theme="dark"] .holie-gb-paneel{background:#1f1f20;color:#e3e3e3;color-scheme:dark}
+.dark .holie-gb-paneel .holie-gb-knop[data-variant="default"],[data-theme="dark"] .holie-gb-paneel .holie-gb-knop[data-variant="default"]{background:#e3e3e3;border-color:#e3e3e3;color:#1f1f20}
+@media (prefers-color-scheme:dark){
+:root:not(.light):not([data-theme="light"]) .holie-gb-paneel{background:#1f1f20;color:#e3e3e3;color-scheme:dark}
+:root:not(.light):not([data-theme="light"]) .holie-gb-paneel .holie-gb-knop[data-variant="default"]{background:#e3e3e3;border-color:#e3e3e3;color:#1f1f20}
+}
 .holie-gb-paneel h2{margin:0 0 1rem;font-size:1.125rem}
 .holie-gb-form{display:flex;flex-direction:column;gap:.75rem}
 .holie-gb-veld{display:flex;flex-direction:column;gap:.25rem;font-size:.875rem}
@@ -972,6 +1015,105 @@ export function maakGebruikersBeheer<R extends ReactLike>(
   React: R,
 ): (props: GebruikersBeheerProps) => ReturnType<R["createElement"]> {
   const h = React.createElement;
+
+  /** Focusbare elementen binnen een container. */
+  const focusbaar = (el: DomEl) =>
+    Array.from(el.querySelectorAll(FOCUSBAAR)).filter((e) =>
+      !e.hasAttribute("disabled") && e.getAttribute("aria-hidden") !== "true"
+    );
+
+  /**
+   * De ingebouwde dialoog met focusbeheer: focus erin bij openen, Tab blijft binnen het paneel,
+   * Escape sluit, en bij sluiten gaat de focus terug naar waar hij was. Bestaat dat element niet
+   * meer, dan naar `terugval`. Alleen aangekoppeld terwijl de dialoog open is.
+   */
+  function Paneel(props: {
+    titelId: string;
+    titel: string;
+    onSluit: () => void;
+    terugval: () => DomEl | null;
+    children?: Inhoud;
+  }) {
+    type Staat = {
+      paneel: DomEl | null;
+      vorig: DomEl | null;
+      terugval: () => DomEl | null;
+    };
+    // Het element met focus vóór het openen: de eerste render komt voor elke focusverplaatsing.
+    const [s] = React.useState((): Staat => ({
+      paneel: null,
+      vorig: (doc()?.activeElement ?? null) as
+        | DomEl
+        | null,
+      terugval: props.terugval,
+    })) as [Staat, unknown];
+    s.terugval = props.terugval;
+    React.useEffect(() => {
+      const paneel = s.paneel;
+      if (paneel) (focusbaar(paneel)[0] ?? paneel).focus();
+      return () => {
+        const vorig = s.vorig;
+        if (vorig && vorig.isConnected) {
+          vorig.focus();
+          if (doc()?.activeElement === vorig) return;
+        }
+        s.terugval()?.focus();
+      };
+    }, []);
+    return h(
+      "div",
+      {
+        className: "holie-gb-scherm",
+        onClick: (e: { target: unknown; currentTarget: unknown }) => {
+          if (e.target === e.currentTarget) props.onSluit();
+        },
+        onKeyDown: (
+          e: { key: string; shiftKey: boolean; preventDefault(): void },
+        ) => {
+          if (e.key === "Escape") {
+            props.onSluit();
+            return;
+          }
+          const paneel = s.paneel;
+          if (e.key !== "Tab" || !paneel) return;
+          const lijst = focusbaar(paneel);
+          if (lijst.length === 0) {
+            e.preventDefault();
+            paneel.focus();
+            return;
+          }
+          const eerste = lijst[0];
+          const laatste = lijst[lijst.length - 1];
+          const actief = doc()?.activeElement;
+          if (!paneel.contains(actief) || actief === paneel) {
+            e.preventDefault();
+            (e.shiftKey ? laatste : eerste).focus();
+          } else if (e.shiftKey && actief === eerste) {
+            e.preventDefault();
+            laatste.focus();
+          } else if (!e.shiftKey && actief === laatste) {
+            e.preventDefault();
+            eerste.focus();
+          }
+        },
+      },
+      h(
+        "div",
+        {
+          className: "holie-gb-paneel",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": props.titelId,
+          tabIndex: -1,
+          ref: (el: DomEl | null) => {
+            s.paneel = el;
+          },
+        },
+        h("h2", { id: props.titelId }, props.titel),
+        props.children,
+      ),
+    );
+  }
 
   return function GebruikersBeheer(
     props: GebruikersBeheerProps,
@@ -1020,6 +1162,17 @@ export function maakGebruikersBeheer<R extends ReactLike>(
         bevestiging: string;
       }) => void,
     ];
+
+    // Het beheerscherm zelf: terugval voor de focus als het element van vóór de dialoog weg is.
+    const [wortel] = React.useState(() => ({
+      el: null as DomEl | null,
+    })) as [
+      { el: DomEl | null },
+      unknown,
+    ];
+    const terugvalFocus = () =>
+      wortel.el?.querySelector('input[type="search"]') ??
+        wortel.el;
 
     const label = (rol: string) => rolLabels[rol] ?? rol;
     const datum = props.datum ??
@@ -1098,29 +1251,13 @@ export function maakGebruikersBeheer<R extends ReactLike>(
     const dialoog = (p: BeheerDialoogProps) => {
       if (Dialoog) return h(Dialoog, p);
       if (!p.open) return null;
-      return h(
-        "div",
-        {
-          className: "holie-gb-scherm",
-          onClick: (e: { target: unknown; currentTarget: unknown }) => {
-            if (e.target === e.currentTarget) p.onSluit();
-          },
-          onKeyDown: (e: { key: string }) => {
-            if (e.key === "Escape") p.onSluit();
-          },
-        },
-        h(
-          "div",
-          {
-            className: "holie-gb-paneel",
-            role: "dialog",
-            "aria-modal": "true",
-            "aria-labelledby": `${eigenId}-titel`,
-          },
-          h("h2", { id: `${eigenId}-titel` }, p.titel),
-          p.children,
-        ),
-      );
+      return h(Paneel, {
+        titelId: `${eigenId}-titel`,
+        titel: p.titel,
+        onSluit: p.onSluit,
+        terugval: terugvalFocus,
+        children: p.children,
+      });
     };
     const veldBlok = (id: string, tekst: string, inhoud: Inhoud) =>
       h(
@@ -1177,7 +1314,7 @@ export function maakGebruikersBeheer<R extends ReactLike>(
       void doe(
         `actief:${g.id}`,
         () => props.onActief?.(g, actief),
-        t.opgeslagen,
+        actief ? t.geactiveerdMelding : t.gedeactiveerdMelding,
       );
     }
 
@@ -1262,7 +1399,7 @@ export function maakGebruikersBeheer<R extends ReactLike>(
         await doe(
           `verwijder:${g.id}`,
           () => props.onVerwijder?.(g),
-          t.opgeslagen,
+          t.verwijderdMelding,
         )
       ) sluit();
     }
@@ -1421,7 +1558,11 @@ export function maakGebruikersBeheer<R extends ReactLike>(
           ),
         ),
         extraKolom
-          ? h("td", { className: "holie-gb-verberg" }, extraKolom.cel(g))
+          ? h(
+            "td",
+            extraKolom.verbergSmal ? { className: "holie-gb-verberg" } : null,
+            extraKolom.cel(g),
+          )
           : null,
         h("td", null, h("div", { className: "holie-gb-acties" }, ...acties)),
       );
@@ -1606,7 +1747,14 @@ export function maakGebruikersBeheer<R extends ReactLike>(
 
     return h(
       "div",
-      { className: props.className ?? "holie-gb", "data-holie-gebruikers": "" },
+      {
+        className: props.className ?? "holie-gb",
+        "data-holie-gebruikers": "",
+        tabIndex: -1,
+        ref: (el: DomEl | null) => {
+          wortel.el = el;
+        },
+      },
       h("style", null, GEBRUIKERS_CSS),
       h(
         "div",
@@ -1659,7 +1807,13 @@ export function maakGebruikersBeheer<R extends ReactLike>(
               h("th", null, t.rol),
               h("th", null, t.status),
               extraKolom
-                ? h("th", { className: "holie-gb-verberg" }, extraKolom.kop)
+                ? h(
+                  "th",
+                  extraKolom.verbergSmal
+                    ? { className: "holie-gb-verberg" }
+                    : null,
+                  extraKolom.kop,
+                )
                 : null,
               h("th", null, t.acties),
             ),

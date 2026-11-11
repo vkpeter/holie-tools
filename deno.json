@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -20,7 +20,8 @@
     "./login": "./login.ts",
     "./google-terug": "./google-terug.ts",
     "./velden": "./velden.ts",
-    "./gebruikers": "./gebruikers.ts"
+    "./gebruikers": "./gebruikers.ts",
+    "./gebruikers-fetch": "./gebruikers-fetch.ts"
   },
   "publish": {
     "include": [
@@ -46,6 +47,7 @@
       "login.ts",
       "google-terug.ts",
       "gebruikers.ts",
+      "gebruikers-fetch.ts",
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",
