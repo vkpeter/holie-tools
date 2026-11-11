@@ -117,6 +117,15 @@ Een handeling die een string teruggeeft (of gooit), toont die als fout; niets
 teruggeven is gelukt. Het scherm toetst de regels al vóór de handeling, maar de
 server en de databank moeten ze zelf afdwingen.
 
+### Nieuw in 0.36.0: gestapeld op een smal scherm
+
+Onder 640 px is de tabel geen tabel meer: elke gebruiker wordt een blok met de
+velden onder elkaar, en Rol, Status en de `extraKolom` krijgen een klein kopje
+(`data-kop`, enkel als de kop tekst is). Zo blijft een brede `extraKolom`
+leesbaar zonder opzij te scrollen (Peter, 11 nov 2026). `verbergSmal: true`
+verbergt de kolom nog altijd. Eigen CSS die hetzelfde deed (Domus, `beheer.css`)
+mag weg.
+
 ### Nieuw in 0.35.0: scherm en `./gebruikers-fetch`
 
 Bij de uitrol naar Domus (11 nov 2026) kwamen vijf gebreken boven:

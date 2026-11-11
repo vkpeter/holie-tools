@@ -982,7 +982,14 @@ export const GEBRUIKERS_CSS = `
 .holie-gb-form{display:flex;flex-direction:column;gap:.75rem}
 .holie-gb-veld{display:flex;flex-direction:column;gap:.25rem;font-size:.875rem}
 .holie-gb-knoppen{display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap}
-@media (max-width:640px){.holie-gb-verberg{display:none}}
+@media (max-width:640px){
+.holie-gb-tabel,.holie-gb-tabel tbody,.holie-gb-tabel tr,.holie-gb-tabel td{display:block}
+.holie-gb-tabel thead{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}
+.holie-gb-tabel tr{padding:.75rem 0;border-bottom:1px solid rgba(127,127,127,.2)}
+.holie-gb-tabel td{padding:.25rem 0;border:0}
+.holie-gb-tabel td[data-kop]::before{content:attr(data-kop);display:block;font-size:.75rem;opacity:.7}
+.holie-gb-verberg,.holie-gb-tabel .holie-gb-verberg{display:none}
+}
 `;
 
 type Blad =
@@ -1459,7 +1466,7 @@ export function maakGebruikersBeheer<R extends ReactLike>(
       }
       return h(
         "td",
-        null,
+        { "data-kop": t.rol },
         kiezer,
         anders.length
           ? h(
@@ -1547,7 +1554,7 @@ export function maakGebruikersBeheer<R extends ReactLike>(
         rolCel(g),
         h(
           "td",
-          null,
+          { "data-kop": t.status },
           h(
             "span",
             {
@@ -1560,7 +1567,15 @@ export function maakGebruikersBeheer<R extends ReactLike>(
         extraKolom
           ? h(
             "td",
-            extraKolom.verbergSmal ? { className: "holie-gb-verberg" } : null,
+            {
+              className: extraKolom.verbergSmal
+                ? "holie-gb-verberg"
+                : undefined,
+              // Kopje boven de cel op een smal scherm; enkel als de kop tekst is.
+              "data-kop": typeof extraKolom.kop === "string"
+                ? extraKolom.kop
+                : undefined,
+            },
             extraKolom.cel(g),
           )
           : null,

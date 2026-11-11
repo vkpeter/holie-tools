@@ -849,7 +849,11 @@ Deno.test("extraKolom: standaard zichtbaar, met verbergSmal de klasse op kop en 
   assert(!zonder.includes('class="holie-gb-verberg"'));
   const met = maak(true);
   assert(met.includes('<th class="holie-gb-verberg">Toegang</th>'));
-  assert(met.includes('<td class="holie-gb-verberg">T:b</td>'));
+  assert(
+    met.includes('<td class="holie-gb-verberg" data-kop="Toegang">T:b</td>'),
+  );
+  // Zonder verbergSmal: enkel het kopje voor de gestapelde weergave.
+  assert(zonder.includes('<td data-kop="Toegang">T:b</td>'));
   assertEquals(
     met.split('class="holie-gb-verberg"').length - 1,
     1 + RIJEN.length,
@@ -865,8 +869,28 @@ Deno.test("GEBRUIKERS_CSS: donker paneel ook via prefers-color-scheme, behalve b
       ':root:not(.light):not([data-theme="light"]) .holie-gb-paneel{background:#1f1f20',
     ),
   );
-  // De regel voor smalle schermen blijft bestaan.
-  assert(GEBRUIKERS_CSS.includes("@media (max-width:640px){.holie-gb-verberg"));
+});
+
+Deno.test("smal scherm: tabel gestapeld per gebruiker, met kopjes per cel", () => {
+  const smal = GEBRUIKERS_CSS.slice(
+    GEBRUIKERS_CSS.indexOf("@media (max-width:640px){"),
+  );
+  assert(smal.includes(".holie-gb-tabel tr,.holie-gb-tabel td{display:block}"));
+  assert(smal.includes("td[data-kop]::before{content:attr(data-kop)"));
+  // verbergSmal wint van de blokweergave (hogere specificiteit).
+  assert(smal.includes(".holie-gb-tabel .holie-gb-verberg{display:none}"));
+  const html = renderToStaticMarkup(
+    <GebruikersBeheer
+      gebruikers={RIJEN}
+      huidigeId="ik"
+      instelling={INST}
+      extraKolom={{ kop: <b>Toegang</b>, cel: () => "x" }}
+    />,
+  );
+  assert(html.includes(`data-kop="${GEBRUIKERS_TEKSTEN.nl.rol}"`));
+  assert(html.includes(`data-kop="${GEBRUIKERS_TEKSTEN.nl.status}"`));
+  // Een kop die geen tekst is, geeft geen kopje.
+  assert(html.includes("<td>x</td>"));
 });
 
 Deno.test("teksten: verwijderd, uitgeschakeld en ingeschakeld bestaan in alle talen", () => {
