@@ -105,7 +105,7 @@ export const AI_BELEID: AiBeleid = {
       "wie": "Peter",
       "datum": "2026-11-08",
       "reden":
-        "Podcast-ASR op de VPS: eerst het gratis niveau van Gemini rechtstreeks (sleutel holie.be), bij quotum of 429 verder via de Lovable-gateway (Billara-sleutel). Vervangt de Lovable-voorrang van v11.",
+        "Podcast-ASR op de VPS: eerst het gratis niveau van Gemini rechtstreeks (sleutel holie.be), bij quotum of 429 verder via de Lovable-gateway (Tickbook-sleutel). Vervangt de Lovable-voorrang van v11.",
       "bron":
         "Peter, 8 nov 2026: 'nu we weten dat het werkt, mag je idd eerst de gratis gemini tokens op farmen en daarna verder doen op lovable ai tokens'",
     },
@@ -177,7 +177,7 @@ export const AI_BELEID: AiBeleid = {
     "billara": {
       "gegevens": "persoon",
       "omschrijving":
-        "Tickbook/Billara: Telegram-bot, meetings, klantberichten, Roundbook",
+        "Tickbook: Telegram-bot, meetings, klantberichten, Roundbook",
     },
     "phyllox": {
       "gegevens": "persoon",
@@ -199,7 +199,7 @@ export const AI_BELEID: AiBeleid = {
     "roundbook": {
       "context": "roundbook",
       "gegevens": "persoon",
-      "omschrijving": "Roundbook-flows in Billara",
+      "omschrijving": "Roundbook-flows in Tickbook",
     },
     "vacatures": {
       "gegevens": "prive-peter",

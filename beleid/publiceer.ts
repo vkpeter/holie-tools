@@ -22,7 +22,7 @@ import {
   valideerBeleid,
 } from "../beleid.ts";
 
-/** De edge function ai-beleid van Tickbook (Billara op de VPS). */
+/** De edge function ai-beleid van Tickbook (Tickbook op de VPS). */
 export const TICKBOOK_AI_BELEID =
   "https://billara-api.holie.be/functions/v1/ai-beleid";
 

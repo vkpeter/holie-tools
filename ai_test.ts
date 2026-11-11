@@ -1435,7 +1435,7 @@ test("taalcode wordt een taalnaam, en nl is Vlaams", () => {
 
 // --- video in transcribeerAudio ----------------------------------------------
 // Toegevoegd 17-09-2026. Een mp4 mag NIET als `input_audio` vertrekken: de gateway
-// verwacht daar een apart video-deel. Billara deed dit tot vandaag met een eigen
+// verwacht daar een apart video-deel. Tickbook deed dit tot vandaag met een eigen
 // fetch omdat dit pakket het niet kon.
 
 test("stuurt video als een video-deel, niet als input_audio", async () => {
@@ -1547,7 +1547,7 @@ test(
   "leesJson: KEUZE - een fence MIDDENIN de tekst telt ook mee",
   () => {
     // Dit is het gedragsverschil tussen de twee implementaties die dit pakket
-    // vervangt: Billara's `parseAIJson` zocht de eerste fence overal, de
+    // vervangt: Tickbook's `parseAIJson` zocht de eerste fence overal, de
     // podcast-variant streepte alleen fences aan begin en eind weg. Hier staat
     // de eerste variant, en deze test legt dat vast.
     const ruw = 'Hier is het antwoord:\n\n```json\n{"a":1}\n```\n\n' +

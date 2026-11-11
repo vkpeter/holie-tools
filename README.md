@@ -623,7 +623,7 @@ onbeschermd. Nu wacht `aiVerbruikVersturen()` ook op wat al onderweg is.
 
 Een bot die vrije tekst door een AI laat lezen, vergat tot nu elk vorig bericht.
 Vroeg hij "op welk nummer?", dan kwam het antwoord "+32499..." los binnen en was
-het belverzoek weg (Billara, 1 nov 2026: drie berichten voor één oproep). Nu
+het belverzoek weg (Tickbook, 1 nov 2026: drie berichten voor één oproep). Nu
 onthoudt een bot de berichten waarop hij een verduidelijking vroeg, 10 minuten
 lang, en geeft hij ze mee aan de AI.
 
@@ -868,7 +868,7 @@ kan die niet.
 ## Nieuw in 0.18.0: formulieren en bots, de lat N1-N7/T1-T7
 
 Op 27-28 okt 2026 trok Peter de nieuwsbrieven, formulieren en Telegram-bots van
-zeven sites op dezelfde lat: holie, Eendje, Phyllox, Eagle-Eye, Billara, Foodie
+zeven sites op dezelfde lat: holie, Eendje, Phyllox, Eagle-Eye, Tickbook, Foodie
 en ESE. Elke site bouwde de stukken apart. Hier staat per stuk de sterkste
 versie, in twee nieuwe ingangen (`./formulier`, `./codes`) en een uitbreiding
 van `./telegram`.
@@ -1039,7 +1039,7 @@ if (cq && knopWasAangeboden(cq)) {
   `callback_query`. Een klik op een inline-bericht zonder chat telt niet.
 - **`maakBevestigKnop`** maakt `actie:id:vervaltijd:handtekening`. De HMAC (48
   bits) bindt actie, id, vervaltijd en chat: geen verzonnen knop, geen verlengde
-  knop, geen knop uit een andere chat. Billara bewaarde de vervaltijd in een
+  knop, geen knop uit een andere chat. Tickbook bewaarde de vervaltijd in een
   tabel, Eendje en Foodie hadden er geen. Geldig 10 minuten, hoogstens 7 dagen.
   Past altijd in 64 bytes of gooit: met een uuid als id mag de actie 10 tekens
   zijn. Het geheim is een eigen env-var of
@@ -1057,7 +1057,7 @@ if (cq && knopWasAangeboden(cq)) {
 ## Nieuw in 0.17.0: de hele Bot-API, `./ics` en `claimMetVenster`
 
 Uit de panelreview van Roundbook (28-10-2026): drie stukken die in de webshop,
-Billara en Roundbook elk apart gebouwd stonden.
+Tickbook en Roundbook elk apart gebouwd stonden.
 
 ⚠️ **Bump vereist.** Bij een 0.x-versie sluit `^0.16` de 0.17 uit. Wie iets van
 hieronder wil, zet de import op `@holie/tools@^0.17`.
@@ -1265,8 +1265,8 @@ koude isolate eerst een `.well-known`-ontdekking vóór hij een token kan
 verifiëren. De ontdekking wordt enkel binnen één warme isolate gecachet, en
 edge-isolates recyclen constant, dus je betaalt hem in de praktijk per call.
 
-Gemeten 19-09-2026 op Billara: **90-406 ms** bovenop elke call, op een MCP-call
-van ~1.200 ms. Foodie pinde `jwksUri` al; Billara, Eendje en podcast-analyse
+Gemeten 19-09-2026 op Tickbook: **90-406 ms** bovenop elke call, op een MCP-call
+van ~1.200 ms. Foodie pinde `jwksUri` al; Tickbook, Eendje en podcast-analyse
 niet - dezelfde scheefgroei als bij `geheimenGelijk`.
 
 ```ts
@@ -1330,7 +1330,7 @@ dezelfde functie heruit; nieuw sinds 0.9.0 is dat de apostrof ook meegaat
 
 ## Nieuw in 0.8.0 (ai): `leesJson` en `schatUsd`
 
-Twee stukken die in Billara en de podcast-pijplijn dubbel geschreven stonden.
+Twee stukken die in Tickbook en de podcast-pijplijn dubbel geschreven stonden.
 
 ```ts
 import { leesJson, schatUsd, TARIEVEN } from "jsr:@holie/tools@0.8/ai";
@@ -1739,7 +1739,7 @@ return new Response(ics, { headers: { "Content-Type": ICS_CONTENT_TYPE } });
 UPDATE die enkel slaagt als de kolom leeg is, of (met `vensterMs`) ouder dan het
 venster. Postgres zet gelijktijdige UPDATEs op dezelfde rij achter elkaar, dus
 precies één aanroeper krijgt een rij terug. Hetzelfde patroon stond in
-`roundbook-herstel`, in Billara's `claimMelding` en in `startRun`.
+`roundbook-herstel`, in Tickbook's `claimMelding` en in `startRun`.
 
 ```ts
 import { claimMetVenster, geefClaimVrij } from "jsr:@holie/tools@^0.17/runslot";

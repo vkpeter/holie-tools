@@ -2,7 +2,7 @@
  * HTML-escaping voor mails, pagina's en Telegram (`parse_mode: "HTML"`).
  *
  * Waarom een eigen module: op 18-09-2026 stonden er 13 eigen kopieën verspreid
- * over Foodie, Billara, Phyllox, Eendje en Baki. Ze verschilden op één punt: de
+ * over Foodie, Tickbook, Phyllox, Eendje en Baki. Ze verschilden op één punt: de
  * ene escapete de apostrof wel, de andere niet. Zonder apostrof is een waarde in
  * een attribuut tussen enkele aanhalingstekens (`href='...'`) niet veilig, dus
  * deze versie escapet alle vijf.

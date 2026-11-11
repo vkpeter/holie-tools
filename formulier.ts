@@ -4,7 +4,7 @@
  *
  * Waarom een eigen module: op 27-28 okt 2026 trok Peter zeven sites op dezelfde
  * lat (N1-N7). Elke site bouwde die stukken apart: holie, Eendje, Phyllox,
- * Eagle-Eye, Billara, Foodie en ESE. Per stuk staat hieronder welke versie de
+ * Eagle-Eye, Tickbook, Foodie en ESE. Per stuk staat hieronder welke versie de
  * beste was en waarom.
  *
  * Runtime-neutraal: enkel `Request`, Web Crypto en `setTimeout`. Geen

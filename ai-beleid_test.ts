@@ -127,7 +127,7 @@ test("HOLIE_AI_PROJECT zet een project onder beleid", async (_urls, zet) => {
       pogingen.push(p);
     },
   });
-  // Billara = persoon: Claude faalt, DeepSeek is uitgesloten, dus gemini.
+  // Tickbook = persoon: Claude faalt, DeepSeek is uitgesloten, dus gemini.
   assertEquals(r.provider, "gemini");
   assertEquals(r.terugval, true);
   assertEquals(pogingen[0].provider, "anthropic");

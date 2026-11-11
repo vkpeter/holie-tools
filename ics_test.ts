@@ -445,7 +445,7 @@ Deno.test("de uitvoer is deterministisch voor dezelfde invoer en nu", () => {
   assert(/DTSTAMP:\d{8}T\d{6}Z/.test(bouwIcs(k)));
 });
 
-// Byte-gelijkheid met roundbook-ics.ts (Billara, supabase/functions/_shared). De
+// Byte-gelijkheid met roundbook-ics.ts (Tickbook, supabase/functions/_shared). De
 // verwachte tekst is eenmalig uit dat bestand gehaald (28 okt 2026): zelfde afspraak,
 // zelfde `nu`. Roundbook moet na de overstap naar dit pakket dezelfde bytes geven.
 const ROUNDBOOK_KOP = [

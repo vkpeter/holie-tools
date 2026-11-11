@@ -304,7 +304,7 @@ export type AudioFormaat = typeof AUDIO_FORMATEN[number];
  * `{ type: "input_audio", input_audio: { data, format } }` krijgt. Wie een mp4
  * als `input_audio` aanbiedt, krijgt een weigering of een leeg antwoord terug.
  *
- * Toegevoegd 17-09-2026 voor Billara: doorgestuurde video's in Telegram werden
+ * Toegevoegd 17-09-2026 voor Tickbook: doorgestuurde video's in Telegram werden
  * daar met een eigen fetch getranscribeerd, omdat dit pakket ze niet aankon.
  *
  * ☠️ `webm` staat er BEWUST NIET in. De test "weigert een formaat dat het model
@@ -333,7 +333,7 @@ export function isVideoFormaat(formaat: string): formaat is VideoFormaat {
 /**
  * Audioformaten die bij Gemini via de EIGEN `generateContent`-route gaan in plaats
  * van de OpenAI-compatibele route. Die laatste aanvaardt enkel wav en mp3 en gaf op
- * ogg een 400 (gemeten 1-11-2026, Telegram-spraakberichten in Billara). De eigen
+ * ogg een 400 (gemeten 1-11-2026, Telegram-spraakberichten in Tickbook). De eigen
  * route las dezelfde ogg goed met `gemini-3.5-flash-lite` en `gemini-3.1-flash-lite`,
  * zonder denktokens. Enkel ogg staat erin: de andere formaten werken op de
  * OpenAI-route en zijn daar getoetst.
@@ -2997,7 +2997,7 @@ async function genereerBeeldKern(
  * gebeurd is.
  *
  * ⚠️ KEUZE BIJ HET CODEBLOK: DE EERSTE FENCE WAAR DAN OOK IN DE TEKST.
- * Dit pakket vervangt twee implementaties die hierin verschilden. Billara
+ * Dit pakket vervangt twee implementaties die hierin verschilden. Tickbook
  * (`parseAIJson`) zocht de eerste fence overal in de tekst; de podcast-pijplijn
  * (`leesOordeel`, `leesEtiketten`) streepte alleen een fence aan het BEGIN en
  * het EIND weg. De eerste variant staat hier, omdat ze strikt meer aankan:
@@ -3059,7 +3059,7 @@ export function leesJson<T = unknown>(
  * Tarieven per model, in USD PER TOKEN (niet per miljoen).
  *
  * ⚠️ DE EENHEID IS PER TOKEN. De bronnen rekenden verschillend: de podcast-meter
- * schreef het tarief per token uit, Billara schreef `0.27 / 1_000_000`. Hier
+ * schreef het tarief per token uit, Tickbook schreef `0.27 / 1_000_000`. Hier
  * staat overal het bedrag per token, zodat `schatUsd` gewoon kan vermenigvuldigen.
  *
  * Deze bedragen zijn AFGELEZEN, niet geschat. Verzin er geen bij: een model dat

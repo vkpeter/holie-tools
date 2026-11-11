@@ -260,7 +260,7 @@ export function pasAliasToe(
  * Aliassen uit `compilerOptions.paths` van tsconfig.json (`"@/*": ["./src/*"]` wordt
  * `@` naar `<root>/src`). Voor de CLI en de pre-commit-hook, die de Vite-config niet
  * kennen; in Vite zelf komen de aliassen uit `config.resolve.alias`, net als bij de
- * plugin. Zonder dit werd `@/lib/x` een `npm:@/lib/x`-import (Billara, 13 sep 2026).
+ * plugin. Zonder dit werd `@/lib/x` een `npm:@/lib/x`-import (Tickbook, 13 sep 2026).
  */
 export function aliasesUitTsconfig(root: string): ViteAlias[] {
   let tekst: string;
@@ -479,7 +479,7 @@ export async function controleerMcpBundel(
  * en bij wijzigingen in `src/lib/mcp` in dev). Zet hem ná `mcpPlugin()`.
  *
  * `faalHard` (standaard `true`): een mislukte herbouw breekt de Vite-build. Met `false`
- * wordt de fout enkel gelogd en loopt de build door, zoals Billara het in zijn eigen
+ * wordt de fout enkel gelogd en loopt de build door, zoals Tickbook het in zijn eigen
  * wrapper deed; de pre-commit-controle (`controleerMcpBundel`) blijft dan de poort.
  */
 export function mcpBundelHerstelPlugin(

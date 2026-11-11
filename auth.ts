@@ -3,7 +3,7 @@
  * een constante-tijdvergelijking.
  *
  * Waarom een eigen module: op 18-09-2026 stonden er vijf vergelijkingen in vier
- * repo's (podcast-analyse, Eendje, Foodie, Billara). De beste versie kwam uit
+ * repo's (podcast-analyse, Eendje, Foodie, Tickbook). De beste versie kwam uit
  * podcast-analyse en kende als enige de nieuwe `SUPABASE_SECRET_KEYS`; Eendje
  * had die fix niet.
  *
@@ -140,9 +140,9 @@ export interface SupabaseOauthOpties {
  * isolate, en edge-isolates recyclen constant, dus in de praktijk betaal je hem
  * telkens opnieuw.
  *
- * Gemeten 19-09-2026 op Billara: die ontdekkingshop kostte 90-406 ms bovenop elke
+ * Gemeten 19-09-2026 op Tickbook: die ontdekkingshop kostte 90-406 ms bovenop elke
  * call, op een MCP-call van ~1.200 ms totaal. Foodie (hapklik) pinde `jwksUri` al;
- * Billara, Eendje en podcast-analyse niet. Deze helper maakt van die drie regels
+ * Tickbook, Eendje en podcast-analyse niet. Deze helper maakt van die drie regels
  * één aanroep, zodat de volgende MCP-server hem niet opnieuw kan vergeten.
  *
  * ```ts

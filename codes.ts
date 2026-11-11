@@ -12,7 +12,7 @@
  *   Uit Foodie (`_shared/unsubscribe.ts`): de lijst zit in de code, dus een
  *   link uit een herinnering haalt niemand van de nieuwsbrief. Nieuw tegenover
  *   Foodie: een vaste lengte, zodat een korte of afgeknipte code nooit telt
- *   (Billara schrapte op 28 okt 2026 zijn oude codes van 10 tekens, lat N6).
+ *   (Tickbook schrapte op 28 okt 2026 zijn oude codes van 10 tekens, lat N6).
  *
  * Runtime-neutraal: enkel Web Crypto en `TextEncoder`.
  */

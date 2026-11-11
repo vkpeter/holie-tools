@@ -613,7 +613,7 @@ export async function leidWebhookGeheimAf(
 
 // ───────────── Poort: wie mag de bot iets laten doen (T3, T5, T7) ─────────────
 //
-// Uit Billara (`telegram-poll/validatie.ts`) en Eagle-Eye (`telegram-poort.ts`),
+// Uit Tickbook (`telegram-poll/validatie.ts`) en Eagle-Eye (`telegram-poort.ts`),
 // 28 okt 2026. Pure functies, geen netwerk.
 
 type TgId = number | string;
@@ -735,7 +735,7 @@ export function knopWasAangeboden(
  * De parameter uit `/start <parameter>` (deeplink `t.me/<bot>?start=...`), of
  * `null`. Telegram laat daarin enkel `A-Z a-z 0-9 _ -` toe, hoogstens 64
  * tekens; al de rest is geen geldige deeplink. Kent ook `/start@NaamBot
- * <parameter>`. Uit Billara (`startToken`).
+ * <parameter>`. Uit Tickbook (`startToken`).
  */
 export function startParameter(tekst: unknown): string | null {
   if (typeof tekst !== "string" || tekst.length > 200) return null;
@@ -745,7 +745,7 @@ export function startParameter(tekst: unknown): string | null {
 
 // ───────────── Bevestigknop (T4, T7) ─────────────
 
-/** Standaardgeldigheid van een bevestigknop: 10 minuten, zoals bij Billara. */
+/** Standaardgeldigheid van een bevestigknop: 10 minuten, zoals bij Tickbook. */
 export const BEVESTIG_GELDIG_MS = 10 * 60 * 1000;
 
 /** Langste geldigheid van een bevestigknop: 7 dagen. */
@@ -813,7 +813,7 @@ function tijdstip(nu: Date | number | undefined): number {
  * `callback_data` voor een knop die een ingrijpende actie bevestigt (wissen,
  * bellen, een mailing versturen): `actie:id:vervaltijd:handtekening`.
  *
- * Sterker dan elk van de drie versies van 28 okt 2026: Billara bewaarde de
+ * Sterker dan elk van de drie versies van 28 okt 2026: Tickbook bewaarde de
  * vervaltijd in een tabel, Eendje en Foodie hadden geen vervaltijd en geen
  * handtekening (`wis:ja:<id>`, `del_ja:<id>`). Hier zitten de vervaltijd en de
  * chat in een HMAC van 48 bits: een eigen client kan geen knop verzinnen, een
@@ -821,7 +821,7 @@ function tijdstip(nu: Date | number | undefined): number {
  *
  * ⚠️ De knop bewijst de bedoeling, niet dat hij maar één keer gebruikt wordt.
  * Claim de actie atomisch in de databank (`update ... where status = 'open'
- * returning`), zoals Billara voor tickets en undo.
+ * returning`), zoals Tickbook voor tickets en undo.
  *
  * Gooit als het resultaat niet binnen `TELEGRAM_MAX_CALLBACK_BYTES` past of een
  * veld ongeldig is. Met een uuid als id blijven er 10 tekens over voor de actie.
