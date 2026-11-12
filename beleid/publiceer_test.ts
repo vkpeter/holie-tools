@@ -1,5 +1,5 @@
 // `deno task publiceer --uit-tickbook` tegen een nep-Tickbook en een nep-beleidsadres.
-// Er gaat geen aanroep naar beleid.holie.be of billara-api.holie.be.
+// Er gaat geen aanroep naar beleid.holie.be of api.tickbook.eu.
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { AI_BELEID } from "../ai-beleid.ts";
 import { type BeleidEnvelop, controleerEnvelop } from "../beleid.ts";

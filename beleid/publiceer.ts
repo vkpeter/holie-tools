@@ -24,7 +24,7 @@ import {
 
 /** De edge function ai-beleid van Tickbook (Tickbook op de VPS). */
 export const TICKBOOK_AI_BELEID =
-  "https://billara-api.holie.be/functions/v1/ai-beleid";
+  "https://api.tickbook.eu/functions/v1/ai-beleid";
 
 const naarB64 = (b: ArrayBuffer) => {
   let s = "";
