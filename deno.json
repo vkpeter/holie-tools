@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -21,7 +21,8 @@
     "./google-terug": "./google-terug.ts",
     "./velden": "./velden.ts",
     "./gebruikers": "./gebruikers.ts",
-    "./gebruikers-fetch": "./gebruikers-fetch.ts"
+    "./gebruikers-fetch": "./gebruikers-fetch.ts",
+    "./paginering": "./paginering.ts"
   },
   "publish": {
     "include": [
@@ -48,6 +49,7 @@
       "google-terug.ts",
       "gebruikers.ts",
       "gebruikers-fetch.ts",
+      "paginering.ts",
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",
