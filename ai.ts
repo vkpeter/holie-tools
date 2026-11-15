@@ -530,6 +530,14 @@ export interface AiOpties extends BeleidOpties {
   metaModel?: string;
   /** Laat DeepSeek wél nadenken. Standaard uit, zie de modulekop. */
   deepseekDenken?: boolean;
+  /**
+   * `false` (sinds 0.39.0) zet het denkwerk van Claude uit: `thinking: {type: "disabled"}`,
+   * en de extra denkruimte in `max_tokens` vervalt. Gemeten 16-11-2026 (Nilou, spraakanalyse,
+   * Haiku 5.5): 1 item 2,2 s naar 1,2 s; 5 items 6,4 tot 7,3 s naar 2,0 tot 2,7 s.
+   * Standaard (weggelaten of `true`) ongewijzigd. Enkel Haiku 5.5: Opus 5.5 en Sonnet 5.5
+   * geven een 400 op `disabled`. Gaat enkel naar Anthropic, nooit naar de andere providers.
+   */
+  anthropicDenken?: boolean;
   /** De berichten bevatten een beeld. */
   beeld?: boolean;
   /**
@@ -700,6 +708,8 @@ export function bouwAnthropicBody(opties: {
   systemVast?: string;
   systemVariabel?: string;
   cacheModus?: "vast" | "auto";
+  /** `false` zet het denkwerk uit (`thinking: disabled`, zonder denkruimte). Zie `AiOpties.anthropicDenken`. */
+  denken?: boolean;
 }): Record<string, unknown> {
   const cacheTtl = opties.cacheTtl === undefined ? "5m" : opties.cacheTtl;
   const markering = cacheTtl
@@ -762,12 +772,13 @@ export function bouwAnthropicBody(opties: {
   const body: Record<string, unknown> = {
     model: opties.model,
     max_tokens: opties.maxTokens !== undefined
-      ? opties.maxTokens + ANTHROPIC_DENKRUIMTE
+      ? opties.maxTokens + (opties.denken === false ? 0 : ANTHROPIC_DENKRUIMTE)
       : ANTHROPIC_MAX_TOKENS,
     messages: berichten,
     // Een vangnet, geen denkwerk: laag houdt het goedkoop en snel.
     output_config: { effort: "low" },
   };
+  if (opties.denken === false) body.thinking = { type: "disabled" };
 
   if (opties.tools && opties.tools.length > 0) {
     body.tools = opties.tools.map((t) => {
@@ -1952,6 +1963,7 @@ async function callAiKern(
         systemVast: opties.systemVast,
         systemVariabel: opties.systemVariabel,
         cacheModus: opties.cacheModus,
+        denken: opties.anthropicDenken,
       })
       : naam === "deepseek"
       ? bouwDeepseekBody({

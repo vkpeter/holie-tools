@@ -4,6 +4,10 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.39.0 heeft `./ai` de optie `anthropicDenken: false`: Claude Haiku 5.5
+zonder denkwerk (`thinking: disabled`), ruim twee keer sneller bij korte
+JSON-antwoorden.
+
 Sinds 0.38.0 ook `./tekst`: vul, openPlaceholders, slugify (op een woordgrens),
 zonderUrls, hoofdletter, elisie (Frans), woordenGevonden (gecachete regexen) en
 telLinks, voor automatisch gevulde sjablonen zoals de duo-posts van Eendje en

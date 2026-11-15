@@ -1968,3 +1968,45 @@ test("schatUsd kent Claude Haiku 5.5", () => {
   assertAlmostEquals(r.usd, 0.6);
   assertEquals(r.geschat, false);
 });
+
+test("anthropicDenken: false zet het denkwerk van Claude uit, standaard ongewijzigd", () => {
+  const msgs = [{ role: "user", content: "hoi" }];
+  const std = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: msgs,
+    maxTokens: 1000,
+  });
+  assert(!("thinking" in std));
+  assertEquals(std.max_tokens, 9000);
+  const uit = bouwAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: msgs,
+    maxTokens: 1000,
+    denken: false,
+  });
+  assertEquals(uit.thinking, { type: "disabled" });
+  assertEquals(uit.max_tokens, 1000);
+});
+
+test("anthropicDenken: false gaat enkel naar Anthropic, nooit naar de andere providers", async () => {
+  const f = metAntwoorden(
+    { status: 500, content: "" },
+    { status: 500, content: "" },
+    { content: "ok" },
+  );
+  try {
+    await callAi(vraag, { label: "t", sleutels, anthropicDenken: false });
+    for (const a of f.aanroepen) {
+      const b = a.body as Record<string, unknown>;
+      if (a.url.includes("api.anthropic.com")) continue;
+      // DeepSeek krijgt zijn eigen thinking-veld; de andere providers geen enkel.
+      if (a.url.includes("deepseek")) {
+        assertEquals(b.thinking, { type: "disabled" });
+      } else {
+        assert(!("thinking" in b));
+      }
+    }
+  } finally {
+    f.herstel();
+  }
+});
