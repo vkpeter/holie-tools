@@ -4,6 +4,12 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.38.0 ook `./tekst`: vul, openPlaceholders, slugify (op een woordgrens),
+zonderUrls, hoofdletter, elisie (Frans), woordenGevonden (gecachete regexen) en
+telLinks, voor automatisch gevulde sjablonen zoals de duo-posts van Eendje en
+Nilou en later de socials van Roundbook en Tickbook. De woorden zelf (sjablonen,
+verboden woorden) blijven per project.
+
 Sinds 0.35.0 ook `./gebruikers-fetch` (AdminClient op fetch, voor Workers).
 
 Sinds 0.32.0 ook `./gebruikers`:
