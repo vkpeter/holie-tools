@@ -4,6 +4,10 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.40.0 ook `./noindex`: één lijst van pagina's die niet in Google horen
+(uitschrijven, bevestigen, wachtwoord, login, admin) en de helpers om ze af te
+schermen, zie [noindex](#noindex-paginas-die-niet-in-google-horen-0400).
+
 Sinds 0.39.0 heeft `./ai` de optie `anthropicDenken: false`: Claude Haiku 5.5
 zonder denkwerk (`thinking: disabled`), ruim twee keer sneller bij korte
 JSON-antwoorden.
@@ -24,6 +28,37 @@ Sinds 0.31.0 ook `./velden`:
 
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## noindex: pagina's die niet in Google horen (0.40.0)
+
+> **Regel: een noindex-pad staat nooit ook in de `Disallow` van robots.txt.** Een
+> crawler die het pad niet mag ophalen, leest de noindex niet, en een intern
+> gelinkte URL blijft dan zonder snippet in de index staan.
+
+Welke aanpak hangt van het type site af (panel 17 nov 2026):
+
+| Site | Aanpak | Waarom |
+|---|---|---|
+| SPA op Workers Assets (Tickbook, Roundbook, Phyllox, Foodie) | `X-Robots-Tag` in `public/_headers` | werkt ook op het SPA-terugvalpad, zonder JavaScript, niet te vergeten in een component |
+| SSR met eigen Worker (Eendje, ESE, Shintaka, holie.be, les) | `<meta name="robots">` per route | `_headers` geldt daar niet voor het antwoord van de Worker |
+
+```ts
+import { noindexMeta, noindexPadenVoor, zetNoindexBlok } from "@holie/tools/noindex";
+
+// SPA: de paden die in deze app echt bestaan, als blok in _headers (idempotent)
+const paden = noindexPadenVoor(["/", "/auth", "/admin/team", "/r/$id"], ["/r"]);
+Deno.writeTextFileSync("public/_headers", zetNoindexBlok(Deno.readTextFileSync("public/_headers"), paden));
+
+// SSR (TanStack Start): head: () => ({ meta: [noindexMeta()] })
+```
+
+`NOINDEX_STANDAARD` is de gedeelde lijst (basispaden; elk geldt ook voor alles
+eronder). `noindexPadenVoor(routes, extra)` houdt enkel over wat de app heeft.
+`isNoindexPad` / `robotsMeta` beslissen per pad, `zetNoindex()` zet de meta in
+een SPA zonder Helmet, `disallowTegenNoindex(robotsTekst, paden)` vindt de
+tegenstrijdigheid met robots.txt. Privacypagina's staan er bewust niet in.
+Houd in elke app een toets die `zetNoindexBlok(_headers, paden) === _headers`
+afdwingt, zodat de lijst niet uit de pas loopt.
 
 ## Versie bumpen in de apps
 

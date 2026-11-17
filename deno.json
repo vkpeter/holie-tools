@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -23,7 +23,8 @@
     "./gebruikers": "./gebruikers.ts",
     "./gebruikers-fetch": "./gebruikers-fetch.ts",
     "./paginering": "./paginering.ts",
-    "./tekst": "./tekst.ts"
+    "./tekst": "./tekst.ts",
+    "./noindex": "./noindex.ts"
   },
   "publish": {
     "include": [
@@ -52,6 +53,7 @@
       "gebruikers-fetch.ts",
       "paginering.ts",
       "tekst.ts",
+      "noindex.ts",
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",
