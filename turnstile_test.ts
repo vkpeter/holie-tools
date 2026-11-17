@@ -62,3 +62,40 @@ Deno.test("ongeldige waarde met geldige terugval: terugval, wel een melding", ()
 Deno.test("ongeldige terugval wordt genegeerd", () => {
   assertEquals(turnstileSitekey(undefined, "kapot"), "");
 });
+
+Deno.test("commentaar of CRLF achter de waarde: ongeldig, widget uit, wel een melding", () => {
+  for (
+    const raw of [`${KEY} # sitekey Nilou`, `${KEY} // sitekey`, `'${KEY}' # x`]
+  ) {
+    const r = zonderLog(() => turnstileSitekey(raw));
+    assertEquals(r.uit, "", raw);
+    assertEquals(r.meldingen, 1, raw);
+  }
+  // Windows-regeleinde uit een .env-bestand valt als witruimte weg.
+  assertEquals(turnstileSitekey(`${KEY}\r\n`), KEY);
+});
+
+Deno.test("geen tekst (undefined, null, getal, object): zonder melding terugval of uit", () => {
+  const r = zonderLog(() => [
+    turnstileSitekey(null),
+    turnstileSitekey(42),
+    turnstileSitekey({}),
+    turnstileSitekey(null, KEY),
+  ]);
+  assertEquals(r.uit, ["", "", "", KEY]);
+  assertEquals(r.meldingen, 0);
+});
+
+Deno.test("de melding bevat de naam van de bouwvariabele, geen volledige waarde", () => {
+  const meldingen: string[] = [];
+  const orig = console.error;
+  console.error = (m: unknown) => meldingen.push(String(m));
+  try {
+    turnstileSitekey("x".repeat(200));
+  } finally {
+    console.error = orig;
+  }
+  assertEquals(meldingen.length, 1);
+  assertEquals(meldingen[0].includes("VITE_TURNSTILE_SITEKEY"), true);
+  assertEquals(meldingen[0].includes("x".repeat(100)), false);
+});
