@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.41.0",
+  "version": "0.41.1",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -25,7 +25,8 @@
     "./paginering": "./paginering.ts",
     "./tekst": "./tekst.ts",
     "./noindex": "./noindex.ts",
-    "./afzender": "./afzender.ts"
+    "./afzender": "./afzender.ts",
+    "./turnstile": "./turnstile.ts"
   },
   "publish": {
     "include": [
@@ -56,6 +57,7 @@
       "tekst.ts",
       "noindex.ts",
       "afzender.ts",
+      "turnstile.ts",
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",

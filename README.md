@@ -4,6 +4,11 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.41.1 ook `./turnstile`: `turnstileSitekey(raw, terugval?)` knipt
+witruimte en aanhalingstekens van `VITE_TURNSTILE_SITEKEY`, toetst het formaat
+`0x...` en meldt een ongeldige waarde met `console.error` (zie
+[turnstile](#turnstile-sitekey-schoon-en-getoetst-0411)).
+
 Sinds 0.41.0 ook `./afzender`: een ingelogde gebruiker hoeft zijn e-mailadres
 niet nog eens in te vullen in een contact- of feedbackformulier, zie
 [afzender](#afzender-ingelogd-dan-geen-e-mailveld-0410).
@@ -33,6 +38,24 @@ Sinds 0.31.0 ook `./velden`:
 
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## turnstile: sitekey schoon en getoetst (0.41.1)
+
+Aanleiding 17 nov 2026: Nilou-contactformulier faalde omdat
+`VITE_TURNSTILE_SITEKEY` met aanhalingstekens in de bouwomgeving stond
+(`docker --env-file` neemt ze letterlijk over).
+
+```ts
+import { turnstileSitekey } from "@holie/tools/turnstile";
+
+export const TURNSTILE_SITEKEY = turnstileSitekey(
+  import.meta.env.VITE_TURNSTILE_SITEKEY,
+  "0x4AAAAAAF...", // optionele ingebouwde sleutel
+);
+```
+
+Leeg of ontbrekend: terugval, of `""` (widget uit). Gevuld maar geen `0x...`:
+`console.error` en dan de terugval of `""`.
 
 ## afzender: ingelogd, dan geen e-mailveld (0.41.0)
 
