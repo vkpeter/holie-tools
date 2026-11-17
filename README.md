@@ -4,9 +4,10 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
-Sinds 0.40.0 ook `./noindex`: één lijst van pagina's die niet in Google horen
-(uitschrijven, bevestigen, wachtwoord, login, admin) en de helpers om ze af te
-schermen, zie [noindex](#noindex-paginas-die-niet-in-google-horen-0400).
+Sinds 0.40.1 ook `./noindex` (0.40.0 is nooit gepubliceerd): één lijst van
+pagina's die niet in Google horen (uitschrijven, bevestigen, wachtwoord, login,
+admin) en de helpers om ze af te schermen, zie
+[noindex](#noindex-paginas-die-niet-in-google-horen-0400).
 
 Sinds 0.39.0 heeft `./ai` de optie `anthropicDenken: false`: Claude Haiku 5.5
 zonder denkwerk (`thinking: disabled`), ruim twee keer sneller bij korte
