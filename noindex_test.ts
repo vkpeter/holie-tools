@@ -3,6 +3,7 @@ import {
   disallowTegenNoindex,
   type DocumentLike,
   isNoindexPad,
+  NOINDEX_STANDAARD,
   noindexHeadersBlok,
   noindexMeta,
   noindexPadenVoor,
@@ -175,4 +176,17 @@ Deno.test("zetNoindex: nieuwe meta, bestaande vervangen, herstel", () => {
   h2();
   assertEquals(bestaand.attrs.content, "index, follow");
   assertEquals(zetNoindex(undefined) instanceof Function, true);
+});
+
+Deno.test("NOINDEX_STANDAARD bevat /settings en disallowTegenNoindex meldt een Disallow erop", () => {
+  assertEquals(NOINDEX_STANDAARD.includes("/settings"), true);
+  const robots =
+    "User-agent: *\nAllow: /\nDisallow: /settings\nDisallow: /settings/\n";
+  assertEquals(disallowTegenNoindex(robots, ["/settings", "/login"]), [
+    "/settings",
+  ]);
+  assertEquals(
+    disallowTegenNoindex("User-agent: *\nAllow: /\n", ["/settings"]),
+    [],
+  );
 });

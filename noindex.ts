@@ -51,6 +51,7 @@ export const NOINDEX_STANDAARD: readonly string[] = [
   "/admin",
   "/dashboard",
   "/account",
+  "/settings",
   "/profiel",
   "/checkout",
 ];
