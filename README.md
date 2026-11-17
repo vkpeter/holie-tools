@@ -4,6 +4,10 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.41.0 ook `./afzender`: een ingelogde gebruiker hoeft zijn e-mailadres
+niet nog eens in te vullen in een contact- of feedbackformulier, zie
+[afzender](#afzender-ingelogd-dan-geen-e-mailveld-0410).
+
 Sinds 0.40.1 ook `./noindex` (0.40.0 is nooit gepubliceerd): één lijst van
 pagina's die niet in Google horen (uitschrijven, bevestigen, wachtwoord, login,
 admin) en de helpers om ze af te schermen, zie
@@ -29,6 +33,32 @@ Sinds 0.31.0 ook `./velden`:
 
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## afzender: ingelogd, dan geen e-mailveld (0.41.0)
+
+Aanleiding 17 nov 2026: het contactformulier van Nilou vroeg een ingelogde
+gebruiker om zijn e-mailadres. Voor alle apps met een formulier en een login:
+
+- **Client**: `afzenderUitSessie(user)` geeft `{ email, naam, ingelogd }`.
+  Ingelogd: toon het veld niet, maar één regel "Je antwoord komt naar <adres>";
+  vul de naam voor. Niet ingelogd: het formulier blijft zoals het was.
+- **Server**: `sessieGebruiker(req, client)` leest `Authorization: Bearer <jwt>`
+  en keurt het na met `auth.getUser(jwt)`; `afzenderUitSessie(user, body)` neemt
+  dan het adres uit de sessie en laat het adres in de body links liggen. Een
+  anon-sleutel, een verlopen token, een anonieme of onbevestigde account geeft
+  "niet ingelogd" en valt terug op het formulier. Turnstile en limieten blijven
+  zoals ze zijn.
+
+```ts
+import {
+  afzenderUitSessie,
+  sessieGebruiker,
+} from "jsr:@holie/tools@^0.41.0/afzender";
+
+const user = await sessieGebruiker(req, supabase); // supabase-js-client
+const { email, naam, ingelogd } = afzenderUitSessie(user, body);
+if (!email) return json(400, { error: "Invalid email" });
+```
 
 ## noindex: pagina's die niet in Google horen (0.40.0)
 
