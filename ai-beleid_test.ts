@@ -203,6 +203,7 @@ test("een gewone 400 komt niet in de negatieve cache", async (urls, zet) => {
 test("isTegoedFout herkent de bekende teksten", () => {
   assert(isTegoedFout(400, "Your credit balance is too low"));
   assert(isTegoedFout(402, "Insufficient Balance"));
+  assert(isTegoedFout(400, "You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC."));
   assert(!isTegoedFout(500, "credit"));
   assert(!isTegoedFout(400, "invalid model"));
   return Promise.resolve();

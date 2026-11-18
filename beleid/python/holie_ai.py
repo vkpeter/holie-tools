@@ -16,7 +16,7 @@ waar het beleid dat voor de gegevens eist (bv. "persoon"). Meta (Muse) doet enke
 Prompt caching voor Claude (py-1.4.0, zelfde semantiek als `cacheTtl`, `systemVast`, `systemVariabel`
 en `cacheModus` in `callAi`): `cache_ttl` ("5m" standaard, "1h", of False), `system_vast`,
 `system_variabel` en `cache_modus="auto"`. De cache-tokens gaan mee naar de centrale teller.
-Terugval naar de volgende provider bij: 400/401/402 met "credit" of "balance" in de tekst (tegoed
+Terugval naar de volgende provider bij: 400/401/402 met "credit", "balance" of "usage limit" in de tekst (tegoed
 op: die provider 10 min overgeslagen), 429, 5xx (ook 529), timeout, netwerkfout en elke andere
 4xx (zonder cache). Verbruik en storingen gaan naar de centrale teller. Nooit een sleutel in
 een log.
@@ -75,7 +75,8 @@ class AiOnbeschikbaar(Exception):
 
 def is_tegoed_fout(status: int, tekst: str) -> bool:
     low = (tekst or "").lower()
-    return status in (400, 401, 402) and ("credit" in low or "balance" in low)
+    # "usage limit": Anthropic 400 bij een bereikte eigen maandlimiet (18 nov 2026).
+    return status in (400, 401, 402) and ("credit" in low or "balance" in low or "usage limit" in low)
 
 
 def _cache_sleutel(provider: str, sleutel: str) -> str:

@@ -1248,10 +1248,11 @@ const cacheSleutel = (provider: string, sleutel: string) =>
 /**
  * Zegt een foutantwoord dat het tegoed op is (of de rekening geblokt)? 400/401/402 met
  * "credit" of "balance" in de tekst: Anthropic geeft 400 "credit balance is too low",
- * DeepSeek 402 "Insufficient Balance".
+ * DeepSeek 402 "Insufficient Balance", en Anthropic 400 "You have reached your specified API
+ * usage limits" als de eigen maandlimiet bereikt is (18-11-2026).
  */
 export function isTegoedFout(status: number, tekst: string): boolean {
-  return [400, 401, 402].includes(status) && /credit|balance/i.test(tekst);
+  return [400, 401, 402].includes(status) && /credit|balance|usage limit/i.test(tekst);
 }
 
 function markeerTegoedOp(provider: string, sleutel: string, nu = Date.now()) {
