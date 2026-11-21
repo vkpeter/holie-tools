@@ -1252,7 +1252,8 @@ const cacheSleutel = (provider: string, sleutel: string) =>
  * usage limits" als de eigen maandlimiet bereikt is (18-11-2026).
  */
 export function isTegoedFout(status: number, tekst: string): boolean {
-  return [400, 401, 402].includes(status) && /credit|balance|usage limit/i.test(tekst);
+  return [400, 401, 402].includes(status) &&
+    /credit|balance|usage limit/i.test(tekst);
 }
 
 function markeerTegoedOp(provider: string, sleutel: string, nu = Date.now()) {
