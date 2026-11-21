@@ -33,7 +33,14 @@ Deno.test("credit: taalcode wordt genormaliseerd, onbekend wordt en", () => {
   assertEquals(creditTaal("nl-BE"), "nl");
   assertEquals(creditTaal("FR_fr"), "fr");
   assertEquals(creditTaal(" de "), "de");
-  assertEquals(creditTaal("es"), "en");
+  assertEquals(creditTaal("zz"), "en");
   assertEquals(creditTaal(undefined), "en");
   assertEquals(holieCredit("eigen").tekst, "Built by holie.be");
+});
+
+Deno.test("credit: extra talen enkel voor eigen product, klantsite valt terug op en", () => {
+  assertEquals(holieCredit("eigen", "es").tekst, "Creado por holie.be");
+  assertEquals(holieCredit("eigen", "tr").tekst, "holie.be tarafından yapıldı");
+  assertEquals(holieCredit("eigen", "ja").tekst, "holie.be 制作");
+  assertEquals(holieCredit("klant", "es").tekst, "Website by holie.be");
 });
