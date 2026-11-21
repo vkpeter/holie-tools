@@ -4,6 +4,9 @@ Twee kleine hulpmodules zonder dependencies, met een eigen ingang per onderdeel:
 `@holie/tools/ai` (providerketen voor chat-completions) en `@holie/tools/talen`
 (welke talen een site kent, aanbiedt en actief gebruikt).
 
+Sinds 0.42.0 ook `./credit`: de Holie-credit in de voet van een site, één bron voor
+de teksten (zie [credit](#credit-holie-credit-in-de-voet-0420)).
+
 Sinds 0.41.1 ook `./turnstile`: `turnstileSitekey(raw, terugval?)` knipt
 witruimte en aanhalingstekens van `VITE_TURNSTILE_SITEKEY`, toetst het formaat
 `0x...` en meldt een ongeldige waarde met `console.error` (zie
@@ -38,6 +41,23 @@ Sinds 0.31.0 ook `./velden`:
 
 Sinds 0.18.0 ook `./formulier` en `./codes`: zie
 [de lat N1-N7/T1-T7](#nieuw-in-0180-formulieren-en-bots-de-lat-n1-n7t1-t7).
+
+## credit: Holie-credit in de voet (0.42.0)
+
+Vaste regel van 21 nov 2026 (vault: `_Werkwijze/WERKWIJZE-holie-credit.md`). Eén bron,
+zodat een naamwissel één wijziging is.
+
+```ts
+import { holieCredit } from "@holie/tools/credit";
+
+const { tekst, href } = holieCredit("eigen", lang); // "Gemaakt door holie.be", https://holie.be
+```
+
+- `"eigen"`: eigen product (Gemaakt door / Réalisé par / Entwickelt von / Built by).
+- `"klant"`: klantsite (Website door / Site réalisé par / Website von / Website by).
+- Talen `nl`, `fr`, `de`, `en`; `nl-BE` wordt `nl`, een onbekende taal wordt `en`.
+- Ook `CREDIT_TEKSTEN`, `HOLIE_URL`, `HOLIE_NAAM` en `creditTaal`. Geen React-component:
+  de voet van elke site heeft zijn eigen opmaak, de module levert enkel tekst en link.
 
 ## turnstile: sitekey schoon en getoetst (0.41.1)
 
