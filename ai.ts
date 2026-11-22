@@ -411,8 +411,18 @@ export function leesGeminiNatief(ruw: any): any {
         completion_tokens: Number(u.candidatesTokenCount ?? 0) +
           Number(u.thoughtsTokenCount ?? 0),
         total_tokens: Number(u.totalTokenCount ?? 0),
+        ...(Number(u.cachedContentTokenCount) > 0
+          ? {
+            prompt_tokens_details: {
+              cached_tokens: Number(u.cachedContentTokenCount),
+            },
+          }
+          : {}),
       }
       : undefined,
+    ...(typeof ruw?.modelVersion === "string"
+      ? { model: ruw.modelVersion }
+      : {}),
     ...(ruw?.error ? { error: ruw.error } : {}),
   };
 }
@@ -462,6 +472,10 @@ export interface AiPoging {
   status: number;
   finishReason?: string;
   usage?: AiVerbruik;
+  /** Het model dat de provider zegt te hebben bediend (`response.model`), kan afwijken van `model` (sinds 0.47.0). */
+  modelBediend?: string;
+  /** DeepSeek `system_fingerprint`: wisselt als de backend wisselt (sinds 0.47.0). */
+  systemFingerprint?: string;
   /** Lengte van de ontvangen inhoud in tekens, als er een antwoord was. */
   lengte?: number;
   /** Omschrijving van wat er misliep; leeg bij succes. */
@@ -585,6 +599,10 @@ export interface AiAntwoord {
   model: string;
   finishReason?: string;
   usage?: AiVerbruik;
+  /** Het model dat de provider zegt te hebben bediend (`response.model`; sinds 0.47.0). */
+  modelBediend?: string;
+  /** DeepSeek `system_fingerprint` (sinds 0.47.0). */
+  systemFingerprint?: string;
   /** Onder beleid: type, soort gegevens en of het een terugval was (sinds 0.22.0). */
   type?: AiType;
   gegevens?: Gegevens;
@@ -1498,6 +1516,12 @@ export interface VerbruikRegel {
   batch_aanroepen?: number;
   batch_gewist?: number;
   batch_wis_mislukt?: number;
+  /**
+   * Bediende modellen (sinds 0.47.0, optioneel): wat de provider zegt te hebben bediend
+   * (`response.model` / `modelVersion`), met DeepSeek `system_fingerprint`, per aantal aanroepen.
+   * Hoogstens 5 per regel. De beleids-Worker negeert dit veld tot hij het opslaat.
+   */
+  modellen?: { model: string; fingerprint?: string; aantal: number }[];
 }
 
 /** De extra tellers van een regel (sinds 0.34.0). */
@@ -1558,6 +1582,10 @@ export interface VerbruikMelding {
   storingen?: { provider: string; soort: "tegoed" | "fout"; status?: number }[];
   /** Cache-tokens van deze aanroep (sinds 0.34.0), uit `cacheTokens(usage)`. */
   cache?: { lees: number; schrijf5m: number; schrijf1u: number };
+  /** Het bediende model (`response.model`; sinds 0.47.0). */
+  model?: string;
+  /** DeepSeek `system_fingerprint` (sinds 0.47.0). */
+  systemFingerprint?: string;
   /** Liep via de Batch API: `usd` is dan al het halve tarief (sinds 0.34.0). */
   batch?: boolean;
   /** Stand van de DELETE op de batch: `gewist`, `mislukt` of weggelaten. */
@@ -1622,6 +1650,27 @@ export function meldAiVerbruik(melding: VerbruikMelding): void {
     if (melding.batch) tel("batch_aanroepen", 1);
     if (melding.batchWissen === "gewist") tel("batch_gewist", 1);
     if (melding.batchWissen === "mislukt") tel("batch_wis_mislukt", 1);
+    const bediend = typeof melding.model === "string"
+      ? melding.model.slice(0, 80)
+      : "";
+    if (bediend) {
+      const fp = typeof melding.systemFingerprint === "string" &&
+          melding.systemFingerprint
+        ? melding.systemFingerprint.slice(0, 80)
+        : undefined;
+      const lijst = regel.modellen ??= [];
+      const gevonden = lijst.find((x) =>
+        x.model === bediend && x.fingerprint === fp
+      );
+      if (gevonden) gevonden.aantal += 1;
+      else if (lijst.length < 5) {
+        lijst.push({
+          model: bediend,
+          ...(fp ? { fingerprint: fp } : {}),
+          aantal: 1,
+        });
+      }
+    }
     for (const st of melding.storingen ?? []) {
       const sp = String(st.provider || "geen").replace(/-vision$/, "");
       const soort = st.soort === "tegoed" ? "tegoed" : "fout";
@@ -1697,6 +1746,9 @@ async function verstuurVerbruik(url: string): Promise<void> {
         ...(r.storingen?.length
           ? { storingen: r.storingen.map((x) => ({ ...x })) }
           : {}),
+        ...(r.modellen?.length
+          ? { modellen: r.modellen.map((x) => ({ ...x })) }
+          : {}),
       });
       wachtrij.delete(k);
       if (regels.length >= VERBRUIK_MAX_REGELS) break;
@@ -1745,6 +1797,7 @@ export function aiVerbruikWachtrij(): VerbruikRegel[] {
   return [...wachtrij.values()].map((r) => ({
     ...r,
     ...(r.storingen ? { storingen: r.storingen.map((x) => ({ ...x })) } : {}),
+    ...(r.modellen ? { modellen: r.modellen.map((x) => ({ ...x })) } : {}),
   }));
 }
 
@@ -1856,6 +1909,10 @@ export async function callAi(
       terugval: !!a.terugval,
       label,
       cache: (telCache(a.usage), cache),
+      ...(a.modelBediend ? { model: a.modelBediend } : {}),
+      ...(a.systemFingerprint
+        ? { systemFingerprint: a.systemFingerprint }
+        : {}),
       ...(storingen.length ? { storingen } : {}),
     });
     return a;
@@ -2062,12 +2119,22 @@ async function callAiKern(
           const content: string = vertaald
             ? vertaald.content
             : keuze?.message?.content || "";
+          const bediend = {
+            ...(typeof data.model === "string" && data.model
+              ? { modelBediend: data.model as string }
+              : {}),
+            ...(typeof data.system_fingerprint === "string" &&
+                data.system_fingerprint
+              ? { systemFingerprint: data.system_fingerprint as string }
+              : {}),
+          };
           const verslag = {
             ...basis,
             duurMs: Date.now() - start,
             status: resp.status,
             finishReason,
             usage,
+            ...bediend,
             lengte: content.length,
           };
 
@@ -2081,6 +2148,7 @@ async function callAiKern(
               model,
               finishReason,
               usage,
+              ...bediend,
               ...beleidVelden,
               terugval,
             };
@@ -2100,6 +2168,7 @@ async function callAiKern(
                 model,
                 finishReason,
                 usage,
+                ...bediend,
                 ...beleidVelden,
                 terugval,
               };
@@ -3094,6 +3163,8 @@ export const TARIEVEN: Record<string, { input: number; output: number }> = {
   "google/gemini-3-flash-preview": { input: 0.0000005, output: 0.000003 },
   "google/gemini-2.5-flash": { input: 0.0000003, output: 0.0000025 },
   // DeepSeek, cache miss.
+  "deepseek-flash": { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
+  // Oude naam (stille alias van deepseek-flash), voor scripts die hem nog sturen.
   "deepseek-v4-flash": { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
   // Claude Haiku 5.5 tot 100.000 tokens per verzoek; daarboven vijf keer
   // zoveel, dat laat deze tabel buiten beschouwing. Betaald uit het
@@ -3195,7 +3266,7 @@ export function schatUsd(
   // Prompt caching (Anthropic): een schrijf kost 1,25x (5 minuten) of 2x (1 uur) het
   // inputtarief, een lees 0,1x; voor Sonnet 5.5 en Opus 5.5 0,05x (voetnoot 2 van de
   // prijstabel, gelezen 11-11-2026). `input_tokens` telt enkel wat NIET uit/naar de cache ging.
-  const c = cacheTokens(usage);
+  const c = anthropicCacheTokens(usage);
   const leesFactor = LEES_005.has(model) ? 0.05 : 0.1;
   const cacheUsd = tarief.input *
     (c.lees * leesFactor + c.schrijf5m * 1.25 + c.schrijf1u * 2);
@@ -3226,6 +3297,31 @@ const LEES_005 = new Set(["claude-sonnet-5-5", "claude-opus-5-5"]);
  * Zonder uitsplitsing (`cache_creation`) telt elke schrijf als 5 minuten.
  */
 export function cacheTokens(
+  usage?: AiVerbruik,
+): { lees: number; schrijf5m: number; schrijf1u: number } {
+  const a = anthropicCacheTokens(usage);
+  return { ...a, lees: a.lees + overigeCacheLees(usage) };
+}
+
+/**
+ * Cache-hits van de andere providers (sinds 0.47.0): DeepSeek `prompt_cache_hit_tokens`,
+ * Gemini `cachedContentTokenCount` (rechtstreeks, of via `leesGeminiNatief`) en de
+ * OpenAI-vorm `prompt_tokens_details.cached_tokens`. Hier zitten ze IN `prompt_tokens`,
+ * anders dan bij Anthropic; daarom telt `schatUsd` ze niet apart bij.
+ */
+export function overigeCacheLees(usage?: AiVerbruik): number {
+  if (!usage) return 0;
+  const d = usage.prompt_tokens_details as
+    | { cached_tokens?: number }
+    | undefined;
+  const n = Number(usage.prompt_cache_hit_tokens ?? 0) ||
+    Number(d?.cached_tokens ?? 0) ||
+    Number(usage.cachedContentTokenCount ?? 0) || 0;
+  return Math.max(0, n);
+}
+
+/** De Anthropic-cachetokens (de enige met aparte prijs en buiten `prompt_tokens`). */
+function anthropicCacheTokens(
   usage?: AiVerbruik,
 ): { lees: number; schrijf5m: number; schrijf1u: number } {
   const lees = Math.max(0, Number(usage?.cache_read_input_tokens ?? 0) || 0);

@@ -7,8 +7,10 @@ import {
   aiVerbruikVersturen,
   aiVerbruikWachtrij,
   brusselseDag,
+  cacheTokens,
   callAi,
   genereerBeeld,
+  leesGeminiNatief,
   meldAiVerbruik,
   PAKKET_VERSIE,
   stelAiBeleidIn,
@@ -584,3 +586,58 @@ test(
     assert(!oproepen.some((o) => o.url === META_CHAT));
   },
 );
+
+test(
+  "meldt het bediende model, de fingerprint en DeepSeek-cachehits",
+  async (oproepen, zet) => {
+    stelAiBeleidIn({
+      project: "foodie",
+      momentopname: AI_BELEID,
+      verbruik: NEP,
+    });
+    zet((url) =>
+      url.startsWith(NEP) ? new Response("{}") : new Response(JSON.stringify({
+        model: "deepseek-flash",
+        system_fingerprint: "fp_abc",
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 2000,
+          completion_tokens: 5,
+          prompt_cache_hit_tokens: 1920,
+          prompt_cache_miss_tokens: 80,
+        },
+      }))
+    );
+    const a = await callAi(vraag, {
+      label: "t",
+      sleutels: alle,
+      volgorde: ["deepseek"],
+      gegevens: "publiek",
+    });
+    assertEquals(a.modelBediend, "deepseek-flash");
+    assertEquals(a.systemFingerprint, "fp_abc");
+    const w = aiVerbruikWachtrij();
+    assertEquals(w[0].cache_lees, 1920);
+    assertEquals(w[0].modellen, [
+      { model: "deepseek-flash", fingerprint: "fp_abc", aantal: 1 },
+    ]);
+    await aiVerbruikVersturen();
+  },
+);
+
+Deno.test("cacheTokens: hits van DeepSeek, OpenAI-vorm en Gemini", () => {
+  assertEquals(cacheTokens({ prompt_cache_hit_tokens: 64 }).lees, 64);
+  assertEquals(
+    cacheTokens({ prompt_tokens_details: { cached_tokens: 128 } }).lees,
+    128,
+  );
+  assertEquals(cacheTokens({ cachedContentTokenCount: 32 }).lees, 32);
+  assertEquals(cacheTokens({ cache_read_input_tokens: 10 }).lees, 10);
+  const g = leesGeminiNatief({
+    modelVersion: "gemini-3.5-flash-lite-07-2026",
+    candidates: [{ content: { parts: [{ text: "x" }] } }],
+    usageMetadata: { promptTokenCount: 600, cachedContentTokenCount: 512 },
+  });
+  assertEquals(g.model, "gemini-3.5-flash-lite-07-2026");
+  assertEquals(cacheTokens(g.usage).lees, 512);
+});
