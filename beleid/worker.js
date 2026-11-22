@@ -19,6 +19,7 @@
  *   GET  /verbruik?van=&tot=                         de dagteller, enkel met
  *                                                    `Authorization: Bearer <VERBRUIK_LEESSLEUTEL>`
  *   GET  /verbruik-extra?van=&tot=                   (met dezelfde leessleutel) de extra tellers per dag
+ *   GET  /verbruik-modellen?van=&tot=                (met dezelfde leessleutel) bediende modellen per dag (0.47.2)
  *   GET  /storing?dag=YYYY-MM-DD                     (met dezelfde leessleutel) de storingen van een dag
  *                                                    (standaard vandaag Brussel): { storingen: [...] }
  *
@@ -119,6 +120,9 @@ export const EXTRA_VELDEN = [
   "batch_wis_mislukt",
 ];
 const EXTRA_MAX = 1e12;
+/** Bediend model (0.47.2): de naam zoals de provider hem teruggeeft, en bij DeepSeek de fingerprint. */
+const MODEL_RE = /^[A-Za-z0-9._:\/@+-]{1,100}$/;
+const FINGERPRINT_RE = /^[A-Za-z0-9._:-]{0,100}$/;
 const TYPES = new Set([
   "tekst",
   "tools",
@@ -177,6 +181,21 @@ export function regelFout(r, nu = Date.now()) {
   for (const veld of ["batch_aanroepen", "batch_gewist", "batch_wis_mislukt"]) {
     if ((r[veld] ?? 0) > r.aanroepen) return veld;
   }
+  if (r.modellen !== undefined) {
+    if (!Array.isArray(r.modellen) || r.modellen.length > 5) return "modellen";
+    for (const m of r.modellen) {
+      if (!m || typeof m !== "object") return "model";
+      if (typeof m.model !== "string" || !MODEL_RE.test(m.model)) {
+        return "model";
+      }
+      if (
+        m.fingerprint !== undefined &&
+        (typeof m.fingerprint !== "string" ||
+          !FINGERPRINT_RE.test(m.fingerprint))
+      ) return "fingerprint";
+      if (!geheelTussen(m.aantal, 1, r.aanroepen)) return "model-aantal";
+    }
+  }
   if (r.storingen !== undefined) {
     if (!Array.isArray(r.storingen) || r.storingen.length > 10) {
       return "storingen";
@@ -220,6 +239,15 @@ const UPSERT_EXTRA = `INSERT INTO verbruik_extra
     batch_gewist = batch_gewist + excluded.batch_gewist,
     batch_wis_mislukt = batch_wis_mislukt + excluded.batch_wis_mislukt,
     bijgewerkt = excluded.bijgewerkt`;
+
+// Bediende modellen (0.47.2): enkel regels die `modellen` meesturen raken deze tabel, dus oudere
+// clients werken ook zolang de tabel nog niet bestaat. Een lege fingerprint = geen fingerprint.
+const UPSERT_MODEL = `INSERT INTO verbruik_model
+  (dag, project, provider, model, fingerprint, aanroepen, eerste, laatste)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+  ON CONFLICT (dag, project, provider, model, fingerprint) DO UPDATE SET
+    aanroepen = aanroepen + excluded.aanroepen,
+    laatste = excluded.laatste`;
 
 const UPSERT_STORING = `INSERT INTO storing
   (dag, provider, soort, project, aantal, status, eerste, laatste)
@@ -265,6 +293,20 @@ export async function ontvangVerbruik(request, env) {
   // Enkel regels met iets extra raken de tabel `verbruik_extra`: zonder cache of batch (en
   // dus ook voor oudere clients) verandert er niets, ook niet als de tabel nog niet bestaat.
   const stmtExtra = env.VERBRUIK.prepare(UPSERT_EXTRA);
+  const stmtModel = env.VERBRUIK.prepare(UPSERT_MODEL);
+  const modellen = regels.flatMap((r) =>
+    (r.modellen ?? []).map((m) =>
+      stmtModel.bind(
+        r.dag,
+        r.project,
+        r.provider,
+        m.model,
+        m.fingerprint ?? "",
+        m.aantal,
+        tijd,
+      )
+    )
+  );
   const extra = regels.filter((r) => EXTRA_VELDEN.some((v) => (r[v] ?? 0) > 0))
     .map((r) =>
       stmtExtra.bind(
@@ -311,6 +353,7 @@ export async function ontvangVerbruik(request, env) {
     ),
     ...storingen,
     ...extra,
+    ...modellen,
   ]);
   return antwoord({ ok: true, regels: regels.length });
 }
@@ -331,6 +374,27 @@ export async function leesVerbruikExtra(request, env) {
             batch_aanroepen, batch_gewist, batch_wis_mislukt, bijgewerkt
        FROM verbruik_extra WHERE dag >= ?1 AND dag <= ?2
        ORDER BY dag, project, provider, type LIMIT 5000`,
+  ).bind(van, tot).all();
+  return antwoord({ van, tot, regels: results ?? [] }, 200, {
+    "cache-control": "no-store",
+  });
+}
+
+/** GET /verbruik-modellen?van=&tot=: welk model (en fingerprint) elke provider per dag echt bediende. */
+export async function leesVerbruikModellen(request, env) {
+  if (!env.VERBRUIK) return antwoord({ fout: "geen opslag" }, 503);
+  const geweigerd = await leesWeigering(request, env);
+  if (geweigerd) return geweigerd;
+  const url = new URL(request.url);
+  const van = url.searchParams.get("van") || brusselseDag(-35);
+  const tot = url.searchParams.get("tot") || brusselseDag(1);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot)) {
+    return antwoord({ fout: "van/tot als YYYY-MM-DD" }, 400);
+  }
+  const { results } = await env.VERBRUIK.prepare(
+    `SELECT dag, project, provider, model, fingerprint, aanroepen, eerste, laatste
+       FROM verbruik_model WHERE dag >= ?1 AND dag <= ?2
+       ORDER BY dag, project, provider, model LIMIT 5000`,
   ).bind(van, tot).all();
   return antwoord({ van, tot, regels: results ?? [] }, 200, {
     "cache-control": "no-store",
@@ -490,6 +554,9 @@ export default {
     }
     if (pad === "/verbruik-extra" && request.method === "GET") {
       return await leesVerbruikExtra(request, env);
+    }
+    if (pad === "/verbruik-modellen" && request.method === "GET") {
+      return await leesVerbruikModellen(request, env);
     }
     if (pad === "/storing" && request.method === "GET") {
       return await leesStoring(request, env);

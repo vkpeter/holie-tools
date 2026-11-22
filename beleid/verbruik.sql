@@ -52,3 +52,19 @@ CREATE TABLE IF NOT EXISTS verbruik_extra (
   bijgewerkt TEXT NOT NULL,
   PRIMARY KEY (dag, project, provider, type)
 );
+
+-- Bediende modellen (0.47.2): welk model de provider echt teruggaf (response.model, Gemini
+-- modelVersion) en bij DeepSeek de system_fingerprint, per dag, project en provider. Maakt een
+-- stille modelwissel zichtbaar (DeepSeek kent geen vaste versies). Eerst deze tabel uitrollen,
+-- dan de Worker: zonder tabel faalt enkel een regel die `modellen` meestuurt.
+CREATE TABLE IF NOT EXISTS verbruik_model (
+  dag TEXT NOT NULL,
+  project TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  aanroepen INTEGER NOT NULL DEFAULT 0,
+  eerste TEXT NOT NULL,
+  laatste TEXT NOT NULL,
+  PRIMARY KEY (dag, project, provider, model, fingerprint)
+);

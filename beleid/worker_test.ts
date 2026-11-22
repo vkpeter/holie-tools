@@ -10,10 +10,12 @@ function nepD1() {
   const rijen = new Map<string, Rij>();
   const storingen = new Map<string, Rij>();
   const extra = new Map<string, Rij>();
+  const modellen = new Map<string, Rij>();
   const db = {
     rijen,
     storingen,
     extra,
+    modellen,
     prepare(sql: string) {
       return {
         sql,
@@ -22,6 +24,14 @@ function nepD1() {
           return { ...this, args };
         },
         all() {
+          if (this.sql.includes("FROM verbruik_model")) {
+            const [van, tot] = this.args as string[];
+            return Promise.resolve({
+              results: [...modellen.values()].filter((r) =>
+                String(r.dag) >= van && String(r.dag) <= tot
+              ),
+            });
+          }
           if (this.sql.includes("FROM verbruik_extra")) {
             const [van, tot] = this.args as string[];
             return Promise.resolve({
@@ -46,6 +56,29 @@ function nepD1() {
     },
     batch(stmts: { sql: string; args: unknown[] }[]) {
       for (const s of stmts) {
+        if (s.sql.includes("INTO verbruik_model")) {
+          const [dag, project, provider, model, fingerprint, aanroepen, tijd] =
+            s
+              .args as [string, string, string, string, string, number, string];
+          const k = [dag, project, provider, model, fingerprint].join("|");
+          const oud = modellen.get(k);
+          if (!oud) {
+            modellen.set(k, {
+              dag,
+              project,
+              provider,
+              model,
+              fingerprint,
+              aanroepen,
+              eerste: tijd,
+              laatste: tijd,
+            });
+          } else {
+            oud.aanroepen = Number(oud.aanroepen) + aanroepen;
+            oud.laatste = tijd;
+          }
+          continue;
+        }
         if (s.sql.includes("INTO verbruik_extra")) {
           const [dag, project, provider, type, ...tellers] = s.args as [
             string,
@@ -451,4 +484,50 @@ Deno.test("GET /verbruik-extra vraagt de leessleutel", async () => {
   const d = await ok.json();
   assertEquals(d.regels.length, 1);
   assertEquals(d.regels[0].cache_lees, 5);
+});
+
+Deno.test("regelFout: modellen worden begrensd en gecontroleerd", () => {
+  const nu = Date.parse("2026-11-01T12:00:00Z");
+  const m = (x: unknown) =>
+    regelFout(regel({ dag: "2026-11-01", aanroepen: 3, modellen: x }), nu);
+  assertEquals(
+    m([{ model: "deepseek-flash", fingerprint: "bc19ba97", aantal: 2 }]),
+    null,
+  );
+  assertEquals(
+    m([{ model: "google/gemini-3-flash-preview", aantal: 3 }]),
+    null,
+  );
+  assertEquals(m("x"), "modellen");
+  assertEquals(m(Array(6).fill({ model: "a", aantal: 1 })), "modellen");
+  assertEquals(m([{ model: "<script>", aantal: 1 }]), "model");
+  assertEquals(
+    m([{ model: "a", fingerprint: "a b", aantal: 1 }]),
+    "fingerprint",
+  );
+  assertEquals(m([{ model: "a", aantal: 4 }]), "model-aantal");
+});
+
+Deno.test("POST /verbruik met modellen schrijft in verbruik_model, GET /verbruik-modellen leest", async () => {
+  const e = env();
+  const r = regel({
+    aanroepen: 2,
+    modellen: [{ model: "deepseek-flash", fingerprint: "fp1", aantal: 2 }],
+  });
+  await post(e, { regels: [r] });
+  await post(e, { regels: [r] });
+  const vraag = (sleutel?: string) =>
+    worker.fetch(
+      new Request("https://beleid.holie.be/verbruik-modellen", {
+        headers: sleutel ? { authorization: `Bearer ${sleutel}` } : {},
+      }),
+      e,
+      { waitUntil() {} },
+    );
+  assertEquals((await vraag()).status, 401);
+  const d = await (await vraag("lees-geheim")).json();
+  assertEquals(d.regels.length, 1);
+  assertEquals(d.regels[0].model, "deepseek-flash");
+  assertEquals(d.regels[0].fingerprint, "fp1");
+  assertEquals(d.regels[0].aanroepen, 4);
 });
