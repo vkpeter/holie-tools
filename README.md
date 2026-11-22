@@ -930,15 +930,15 @@ Regels die erbij horen:
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
-## Nieuw in 0.46.0 (en 0.46.1, 0.46.2): `./nieuwsbrief-poort`
+## Nieuw in 0.46.0 (en 0.46.1 tot 0.46.3): `./nieuwsbrief-poort`
 
 De mechanische poort vóór het versturen van een nieuwsbrief, plus de beslissing
 overslaan, droog draaien of versturen. Pure functies, geen netwerk.
 
 - `keurNieuwsbrief({ onderwerp, koppen, inhoudTekst, toegelatenGetallen, html, headers, uitschrijfUrl })`
   geeft `{ ok, fouten }`: geen labelwoord (ontdek, geniet, even, lekker,
-  nieuw...) of emoji in onderwerp en koppen (ook in de lopende tekst, 0.46.2),
-  een onderwerp dat met een getal begint, elk getal letterlijk uit
+  nieuw...) of emoji in onderwerp en koppen (ook in de lopende tekst, 0.46.2 en
+  0.46.3), een onderwerp dat met een getal begint, elk getal letterlijk uit
   `toegelatenGetallen` (lever die uit de rekenroutine, nooit uit de tekst),
   uitschrijflink in de mail en in `List-Unsubscribe` (+ one-click), HTML onder
   100 kB, geen `${`, `{{`, `undefined`, `NaN`, geen politiek geladen termen.
