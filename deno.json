@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.44.0",
+  "version": "0.45.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -65,6 +65,7 @@
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",
+      "kaart/python/holie_kaart.py",
       "README.md",
       "LICENSE"
     ]
@@ -83,7 +84,7 @@
   },
   "exclude": [],
   "fmt": { "exclude": ["beleid/python/verwachting.json"] },
-  "lint": { "exclude": ["beleid/python/"] },
+  "lint": { "exclude": ["beleid/python/", "kaart/python/"] },
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "react",

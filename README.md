@@ -178,6 +178,36 @@ if (urls) {
 - `wacht`, `maxPogingen` en `pauzeMs` zijn instelbaar; tests geven een `wacht`
   die meteen terugkomt.
 
+## kaart (Python): gedeelde kaartmotor (0.45.0)
+
+`kaart/python/holie_kaart.py` is de merk-onafhankelijke motor voor
+Instagram-kaarten (Eendje, Nilou, later meer). Alleen standaardbibliotheek. Het
+bestand gaat net als `holie_ai.py` met
+`holie-skills/_tools/vps/jobs/holie_ai_py.py` uit JSR naar
+`/opt/holie/lib/python` op de VPS (lokaal: `~/Apps/holie-tools/kaart/python`).
+Merkspecifiek (kleuren, logo, prompts, querys, R2-bucket) blijft in de jobs en
+komt als parameter binnen.
+
+```python
+import holie_kaart as hk
+
+MERK = hk.Merk(naam="eendje.be", accent="#0F52B4", donker_rgb="15,23,43", logo=EEND_SVG)
+feit = hk.kies_feit(artikel_md, titel, vraag, merk="Eendje.be, een blog", label="eendje-kaart")
+if hk.woordelijk(feit, artikel_md):
+    html = hk.html_feitkaart(feit, titel, "ETEN", foto_url, MERK)
+    hk.render_html(html, "/tmp/k.jpg", fonts=FONTS, pw_cache=PW, image="holie-smoke:1", foto_url=foto_url)
+    url = hk.upload_r2("/tmp/k.jpg", "stam/kaart.jpg", env_pad="/etc/holie/eendje-beeld.env", cdn=CDN)
+```
+
+- Feitkeuze: `kandidaten`, `kies_feit`, `kies_feiten`, `woordelijk`, `kort`,
+  `platte_tekst`. Een kop staat altijd woordelijk in het artikel; het model
+  kiest enkel een nummer.
+- Opmaak (1080x1350, Inter): `Merk`, `basis_css`, `html_feitkaart`, `html_foto`,
+  `html_feiten`, `html_slot`.
+- `render_html` (chrome-headless-shell in docker, `--network none`) en
+  `upload_r2` (`aws s3 cp`, sleutels nooit in een log).
+- Tests: `python -m unittest discover -s kaart/python -p "test_holie_kaart.py"`.
+
 ## Versie bumpen in de apps
 
 > **Regel: package.json en bun.lock gaan samen in één commit.** Een bump die
