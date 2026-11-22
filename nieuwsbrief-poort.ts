@@ -247,6 +247,13 @@ export function keurNieuwsbrief(invoer: NieuwsbriefPoortInvoer): PoortUitkomst {
     fouten.push(`onderwerp is langer dan ${maxOnderwerp} tekens`);
   }
 
+  // Lopende tekst: ook daar geen emoji (een titel uit de bron kan er een bevatten)
+  for (const tekst of invoer.inhoudTekst) {
+    if (heeftEmoji(tekst)) {
+      fouten.push(`tekst bevat een emoji: '${tekst.slice(0, 60)}'`);
+    }
+  }
+
   // Koppen
   for (const kop of invoer.koppen) {
     if (heeftEmoji(kop)) fouten.push(`kop bevat een emoji: '${kop}'`);

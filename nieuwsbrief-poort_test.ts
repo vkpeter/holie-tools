@@ -75,6 +75,14 @@ Deno.test("onderwerp: labelwoord, emoji, geen getal, te lang", () => {
   );
 });
 
+Deno.test("lopende tekst: ook daar geen emoji", () => {
+  const u = keurNieuwsbrief({
+    ...goed(),
+    inhoudTekst: ["Dat kost 140 kcal \u{1F33F}"],
+  });
+  assert(u.fouten.some((f) => f.includes("tekst bevat een emoji")));
+});
+
 Deno.test("koppen: labelwoord en emoji", () => {
   const u = keurNieuwsbrief({
     ...goed(),
