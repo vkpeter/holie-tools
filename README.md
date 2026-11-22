@@ -147,6 +147,36 @@ tegenstrijdigheid met robots.txt. Privacypagina's staan er bewust niet in. Houd
 in elke app een toets die `zetNoindexBlok(_headers, paden) === _headers`
 afdwingt, zodat de lijst niet uit de pas loopt.
 
+## instagram: carrousel via de Graph API (0.44.0)
+
+Een carrousel van 2 tot 10 JPEG-beelden posten, los van de aanroeper zodat het
+met een nep-fetch te testen is.
+
+```ts
+import { geldigeCarrouselUrls, postCarrousel } from "@holie/tools/instagram";
+
+const urls = geldigeCarrouselUrls(body.imageUrls); // 2 tot 10 https-URL's, anders null
+if (urls) {
+  const uitslag = await postCarrousel({
+    fetchFn: fetch,
+    igUserId,
+    accessToken,
+    caption,
+    imageUrls: urls,
+    versie: "v18.0",
+  });
+}
+```
+
+- Flow: een container per beeld, wachten op `FINISHED`, carrouselcontainer met
+  de caption, wachten, `media_publish`.
+- `uitslag.fase === "voorbereiding"`: er is niets gepubliceerd, terugval op een
+  enkele post is veilig. `"publicatie"`: uitkomst onzeker, **geen** terugval
+  (kans op een dubbele post).
+- Het token gaat in een `Authorization: Bearer`-header, nooit in de URL of de
+  body, zodat het niet in een log belandt.
+- `wacht`, `maxPogingen` en `pauzeMs` zijn instelbaar; tests geven een `wacht`
+  die meteen terugkomt.
 ## Versie bumpen in de apps
 
 > **Regel: package.json en bun.lock gaan samen in één commit.** Een bump die

@@ -1,6 +1,6 @@
 {
   "name": "@holie/tools",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "license": "MIT",
   "exports": {
     "./ai": "./ai.ts",
@@ -27,7 +27,8 @@
     "./noindex": "./noindex.ts",
     "./afzender": "./afzender.ts",
     "./turnstile": "./turnstile.ts",
-    "./credit": "./credit.ts"
+    "./credit": "./credit.ts",
+    "./instagram": "./instagram.ts"
   },
   "publish": {
     "include": [
@@ -60,6 +61,7 @@
       "afzender.ts",
       "turnstile.ts",
       "credit.ts",
+      "instagram.ts",
       "sql/gebruikers.sql",
       "beleid/python/holie_ai_beleid.py",
       "beleid/python/holie_ai.py",
