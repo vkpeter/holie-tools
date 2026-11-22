@@ -486,7 +486,7 @@ of uit de optie `sleutels`. Een provider zonder sleutel wordt overgeslagen.
 
 ## ⚠️ DeepSeek V4 denkt standaard na
 
-`deepseek-v4-flash` redeneert standaard eerst (effort "high"). Die
+`deepseek-flash` redeneert standaard eerst (effort "high"). Die
 redeneertokens tellen mee in `max_tokens` en worden als output aangerekend. Met
 een krappe limiet breekt het antwoord af (`finish_reason: "length"`) of blijft
 het leeg. In een test met `max_tokens: 4000` gingen 3602 tokens naar redeneren
@@ -518,7 +518,7 @@ denkwerk wel, zet dan `deepseekDenken: true`.
 | `temperature`          | `0.2`                                            |                                                                            |
 | `lovableModel`         | `google/gemini-3-flash-preview`                  |                                                                            |
 | `anthropicModel`       | `claude-haiku-5-5`                               | Claude op de Messages API, zonder `temperature`                            |
-| `deepseekModel`        | `deepseek-v4-flash`                              | met `beeld`: `deepseek-v4-flash-vision-exp`                                |
+| `deepseekModel`        | `deepseek-flash`                                 | met `beeld`: `deepseek-v4-flash-vision-exp`                                |
 | `deepseekDenken`       | `false`                                          | DeepSeek laten redeneren                                                   |
 | `beeld`                | `false`                                          | de berichten bevatten een beeld                                            |
 | `pogingen`             | `1`                                              | pogingen per provider                                                      |
@@ -929,6 +929,19 @@ Regels die erbij horen:
   nog niet kreeg; mislukt een batch, dan `nieuwsbrief_vrijgeven` voor die batch.
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
+
+## Nieuw in 0.47.0 (ai): bediend model en cachehits van alle providers
+
+- `AiAntwoord` en `AiPoging` krijgen optioneel `modelBediend` (`response.model`, bij Gemini
+  natief `modelVersion`) en `systemFingerprint` (DeepSeek): zo zie je een stille modelwissel.
+- `cacheTokens(usage)` telt nu ook DeepSeek `prompt_cache_hit_tokens`, de OpenAI-vorm
+  `prompt_tokens_details.cached_tokens` en Gemini `cachedContentTokenCount` mee in `lees`
+  (en dus in `cache_lees` van de verbruiksregel). `schatUsd` blijft enkel de Anthropic-cache
+  apart prijzen: bij de rest zitten de hits al in `prompt_tokens`.
+- De verbruiksregel krijgt optioneel `modellen: [{ model, fingerprint?, aantal }]` (max 5). De
+  beleids-Worker negeert dat veld tot hij het opslaat.
+- `deepseek` staat nu op `deepseek-flash`, de naam die de API zelf teruggeeft
+  (`deepseek-v4-flash` is een stille alias; beide staan in `TARIEVEN`).
 
 ## Nieuw in 0.46.0 (en 0.46.1 tot 0.46.3): `./nieuwsbrief-poort`
 

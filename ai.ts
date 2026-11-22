@@ -57,7 +57,7 @@ export {
 export type { BeleidEnvelop } from "./beleid.ts";
 
 /** Deze pakketversie; gaat mee bij het ophalen zodat Tickbook ziet wie welke versie draait. */
-export const PAKKET_VERSIE = "0.34.0";
+export const PAKKET_VERSIE = "0.47.0";
 
 /**
  * `meta` doet beeld-uit (`genereerBeeld`, endpoint `ENDPOINT.meta`) en sinds 0.33.0 ook gewone
@@ -91,7 +91,8 @@ export const STANDAARD_MODELLEN = {
    */
   gemini: "gemini-3.5-flash-lite",
   lovable: "google/gemini-3-flash-preview",
-  deepseek: "deepseek-v4-flash",
+  // De naam die de API zelf teruggeeft; `deepseek-v4-flash` was een stille alias (gemeten 22-11-2026).
+  deepseek: "deepseek-flash",
   /**
    * Meta Muse op `META_CHAT_ENDPOINT` (OpenAI-vorm, Bearer META_MODEL_API_KEY), laatste schakel
    * van de tekstketen (Peter, 9-11-2026). Modellen nagemeten op de VPS (GET /v1/models):
@@ -538,7 +539,7 @@ export interface AiOpties extends BeleidOpties {
    * Dezelfde TTL als `cacheTtl`; zonder cache (`cacheTtl: false`) geen effect.
    */
   cacheModus?: "vast" | "auto";
-  /** Standaard `deepseek-v4-flash`, met `beeld` het vision-model. */
+  /** Standaard `deepseek-flash`, met `beeld` het vision-model. */
   deepseekModel?: string;
   /** Model op Meta Muse (standaard `STANDAARD_MODELLEN.meta`). */
   metaModel?: string;

@@ -227,7 +227,7 @@ test("zet het denkwerk van DeepSeek standaard uit", async () => {
   try {
     await callAi(vraag, { label: "t", sleutels, volgorde: ["deepseek"] });
     assertEquals(f.aanroepen[0].body.thinking, { type: "disabled" });
-    assertEquals(f.aanroepen[0].body.model, "deepseek-v4-flash");
+    assertEquals(f.aanroepen[0].body.model, "deepseek-flash");
   } finally {
     f.herstel();
   }
