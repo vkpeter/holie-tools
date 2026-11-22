@@ -930,9 +930,9 @@ Regels die erbij horen:
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
-## Nieuw in 0.47.1 (ai): bediend model en cachehits van alle providers
+## Nieuw in 0.47.2 (ai): bediend model en cachehits van alle providers
 
-0.47.0 is nooit gepubliceerd (deno fmt faalde op deze README).
+0.47.0 en 0.47.1 zijn nooit gepubliceerd (fmt en lint faalden in CI).
 
 - `AiAntwoord` en `AiPoging` krijgen optioneel `modelBediend` (`response.model`,
   bij Gemini natief `modelVersion`) en `systemFingerprint` (DeepSeek): zo zie je

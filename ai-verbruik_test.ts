@@ -589,7 +589,7 @@ test(
 
 test(
   "meldt het bediende model, de fingerprint en DeepSeek-cachehits",
-  async (oproepen, zet) => {
+  async (_oproepen, zet) => {
     stelAiBeleidIn({
       project: "foodie",
       momentopname: AI_BELEID,
