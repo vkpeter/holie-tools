@@ -486,11 +486,11 @@ of uit de optie `sleutels`. Een provider zonder sleutel wordt overgeslagen.
 
 ## ⚠️ DeepSeek V4 denkt standaard na
 
-`deepseek-flash` redeneert standaard eerst (effort "high"). Die
-redeneertokens tellen mee in `max_tokens` en worden als output aangerekend. Met
-een krappe limiet breekt het antwoord af (`finish_reason: "length"`) of blijft
-het leeg. In een test met `max_tokens: 4000` gingen 3602 tokens naar redeneren
-en brak een JSON-antwoord halverwege af.
+`deepseek-flash` redeneert standaard eerst (effort "high"). Die redeneertokens
+tellen mee in `max_tokens` en worden als output aangerekend. Met een krappe
+limiet breekt het antwoord af (`finish_reason: "length"`) of blijft het leeg. In
+een test met `max_tokens: 4000` gingen 3602 tokens naar redeneren en brak een
+JSON-antwoord halverwege af.
 
 Deze keten stuurt daarom altijd `thinking: { type: "disabled" }` mee. Wil je het
 denkwerk wel, zet dan `deepseekDenken: true`.
@@ -930,16 +930,21 @@ Regels die erbij horen:
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
-## Nieuw in 0.47.0 (ai): bediend model en cachehits van alle providers
+## Nieuw in 0.47.1 (ai): bediend model en cachehits van alle providers
 
-- `AiAntwoord` en `AiPoging` krijgen optioneel `modelBediend` (`response.model`, bij Gemini
-  natief `modelVersion`) en `systemFingerprint` (DeepSeek): zo zie je een stille modelwissel.
-- `cacheTokens(usage)` telt nu ook DeepSeek `prompt_cache_hit_tokens`, de OpenAI-vorm
-  `prompt_tokens_details.cached_tokens` en Gemini `cachedContentTokenCount` mee in `lees`
-  (en dus in `cache_lees` van de verbruiksregel). `schatUsd` blijft enkel de Anthropic-cache
-  apart prijzen: bij de rest zitten de hits al in `prompt_tokens`.
-- De verbruiksregel krijgt optioneel `modellen: [{ model, fingerprint?, aantal }]` (max 5). De
-  beleids-Worker negeert dat veld tot hij het opslaat.
+0.47.0 is nooit gepubliceerd (deno fmt faalde op deze README).
+
+- `AiAntwoord` en `AiPoging` krijgen optioneel `modelBediend` (`response.model`,
+  bij Gemini natief `modelVersion`) en `systemFingerprint` (DeepSeek): zo zie je
+  een stille modelwissel.
+- `cacheTokens(usage)` telt nu ook DeepSeek `prompt_cache_hit_tokens`, de
+  OpenAI-vorm `prompt_tokens_details.cached_tokens` en Gemini
+  `cachedContentTokenCount` mee in `lees` (en dus in `cache_lees` van de
+  verbruiksregel). `schatUsd` blijft enkel de Anthropic-cache apart prijzen: bij
+  de rest zitten de hits al in `prompt_tokens`.
+- De verbruiksregel krijgt optioneel
+  `modellen: [{ model, fingerprint?, aantal }]` (max 5). De beleids-Worker
+  negeert dat veld tot hij het opslaat.
 - `deepseek` staat nu op `deepseek-flash`, de naam die de API zelf teruggeeft
   (`deepseek-v4-flash` is een stille alias; beide staan in `TARIEVEN`).
 
