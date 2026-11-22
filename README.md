@@ -177,6 +177,7 @@ if (urls) {
   body, zodat het niet in een log belandt.
 - `wacht`, `maxPogingen` en `pauzeMs` zijn instelbaar; tests geven een `wacht`
   die meteen terugkomt.
+
 ## Versie bumpen in de apps
 
 > **Regel: package.json en bun.lock gaan samen in één commit.** Een bump die
