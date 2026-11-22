@@ -930,7 +930,7 @@ Regels die erbij horen:
   Twee gelijktijdige runs krijgen nooit dezelfde ontvanger.
 - Titels en andere tekst in de mail altijd door `escapeHtml` (`./html`).
 
-## Nieuw in 0.46.0: `./nieuwsbrief-poort`
+## Nieuw in 0.46.0 (en 0.46.1): `./nieuwsbrief-poort`
 
 De mechanische poort vóór het versturen van een nieuwsbrief, plus de beslissing
 overslaan, droog draaien of versturen. Pure functies, geen netwerk.

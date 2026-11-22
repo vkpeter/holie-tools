@@ -185,8 +185,13 @@ export interface NieuwsbriefPoortInvoer {
   toegelatenGetallen: readonly (string | number)[];
   html: string;
   headers: Readonly<Record<string, string>>;
-  /** De persoonlijke uitschrijflink: moet in de HTML en in `List-Unsubscribe` staan. */
+  /** De persoonlijke uitschrijflink: moet in de HTML staan. */
   uitschrijfUrl: string;
+  /**
+   * De url in `List-Unsubscribe` als die verschilt van de zichtbare link (een
+   * one-click-eindpunt dat een POST aanneemt). Standaard gelijk aan `uitschrijfUrl`.
+   */
+  headerUrl?: string;
   /** Standaard `true`: het onderwerp begint met een getal. */
   onderwerpBegintMetGetal?: boolean;
   /** Standaard `MAX_HTML_BYTES`. */
@@ -276,7 +281,7 @@ export function keurNieuwsbrief(invoer: NieuwsbriefPoortInvoer): PoortUitkomst {
     if (!inHtml) fouten.push("uitschrijflink staat niet in de mail");
     const lu = heeftHeader(invoer.headers, "List-Unsubscribe");
     if (!lu) fouten.push("List-Unsubscribe-header ontbreekt");
-    else if (!lu.includes(`<${url}>`)) {
+    else if (!lu.includes(`<${invoer.headerUrl ?? url}>`)) {
       fouten.push("List-Unsubscribe wijst niet naar de uitschrijflink");
     }
     const post = heeftHeader(invoer.headers, "List-Unsubscribe-Post");

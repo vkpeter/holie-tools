@@ -153,6 +153,23 @@ Deno.test("uitschrijflink: in de mail, in List-Unsubscribe en one-click", () => 
   );
 });
 
+Deno.test("headerUrl: een eigen one-click-eindpunt naast de zichtbare link", () => {
+  const eindpunt =
+    "https://api.example.com/functions/v1/newsletter/unsubscribe?id=1&code=abc";
+  const invoer = {
+    ...goed(),
+    headers: uitschrijfKoppen(eindpunt),
+    headerUrl: eindpunt,
+  };
+  assertEquals(keurNieuwsbrief(invoer).fouten, []);
+  // zonder headerUrl moet de header de zichtbare link bevatten
+  assert(
+    keurNieuwsbrief({ ...invoer, headerUrl: undefined }).fouten.some((f) =>
+      f.includes("wijst niet")
+    ),
+  );
+});
+
 Deno.test("HTML boven de grens en sjabloonresten worden geweigerd", () => {
   const groot = goed().html + "x".repeat(MAX_HTML_BYTES);
   assert(
