@@ -265,7 +265,7 @@ const instelling = {
 | `wijzigEmail`, `wijzigNaam`, `zetActief`, `verwijder` | admin-API; e-mail meteen bevestigd en nooit dat van een ander account                             |
 | `vereisBeheerder(req, { gebruiker, isBeheerder })`    | poort: 401 / 403 / 500 of `{ userId }`; de rolcheck is een functie van de app                     |
 | `maakGebruikersBeheer(React)`                         | scherm: lijst, zoeken, pagina's, rolkeuze, status, bewerken, uitnodigen, opnieuw sturen, ...      |
-| `GEBRUIKERS_TEKSTEN`                                  | nl, en, fr, de                                                                                    |
+| `GEBRUIKERS_TEKSTEN`                                  | nl, en, fr, de, es, it                                                                            |
 
 De serverfuncties krijgen de admin-client (`createClient(url, serviceKey)`) mee
 en lezen geen omgevingsvariabelen: ze werken in een edge function (Deno) en in
@@ -644,8 +644,8 @@ bewaarGoogleTerug(); // op topniveau: vóór supabase-js de hash wist (implicit 
   onder `.dark`), tekst "Doorgaan met Google" (en/fr/de: de officiële
   vertalingen van Google). Na de vorige-knop van de browser staat hij weer klaar
   (`pageshow`).
-- **Teksten**: `taal` (`nl`, `en`, `fr`, `de`) plus losse `teksten` (bv.
-  `inloggen: "Aanmelden"`).
+- **Teksten**: `taal` (`nl`, `en`, `fr`, `de`, `es`, `it`) plus losse `teksten`
+  (bv. `inloggen: "Aanmelden"`).
 - **Slots**: `emailHint`, `onderFormulier` (onthoud mij, uitnodigingstekst, link
   naar registreren), `children` vervangt het formulier (registreren) terwijl de
   volgorde blijft.

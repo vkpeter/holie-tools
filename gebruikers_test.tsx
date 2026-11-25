@@ -894,7 +894,7 @@ Deno.test("smal scherm: tabel gestapeld per gebruiker, met kopjes per cel", () =
 });
 
 Deno.test("teksten: verwijderd, uitgeschakeld en ingeschakeld bestaan in alle talen", () => {
-  for (const taal of ["nl", "en", "fr", "de"] as const) {
+  for (const taal of ["nl", "en", "fr", "de", "es", "it"] as const) {
     const t = GEBRUIKERS_TEKSTEN[taal];
     for (
       const sleutel of [
